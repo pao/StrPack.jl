@@ -7,7 +7,6 @@ export align_default, align_packed, align_packmax, align_structpack, align_table
 export align_x86_pc_linux_gnu, align_native
 export show_struct_layout
 
-require("iostring.jl")
 require("lru.jl")
 
 bswap(c::Char) = identity(c) # white lie which won't work for multibyte characters in UTF-16 or UTF-32
@@ -114,7 +113,7 @@ function gen_readers(convert::Function, types::Array, stream::Symbol, offset::Sy
         push(xprs, quote
             $pad = StrPack.pad_next($offset, $typ, $strategy)
             if $pad > 0
-                skip($stream, $pad)
+                Base.skip($stream, $pad)
                 $offset += $pad
             end
             $offset += sizeof($typ)*prod($dims)
@@ -124,9 +123,9 @@ function gen_readers(convert::Function, types::Array, stream::Symbol, offset::Sy
         push(xprs, if isa(typ, CompositeKind)
             :($rvar = unpack($stream, $typ))
         elseif dims == 1
-            :($rvar = ($convert)(read($stream, $typ)))
+            :($rvar = ($convert)(Base.read($stream, $typ)))
         else
-            :($rvar = map($convert, read($stream, $typ, $dims...)))
+            :($rvar = map($convert, Base.read($stream, $typ, $dims...)))
         end)
     end
     xprs, rvars
@@ -138,7 +137,7 @@ function struct_unpack(convert, types, struct_type)
     @eval function unpack(::Type{$struct_type}, ($in)::IO, ($strategy)::DataAlign)
         $(readers...)
         # tail pad
-        skip($in, StrPack.pad_next($offset, $struct_type, $strategy))
+        Base.skip($in, StrPack.pad_next($offset, $struct_type, $strategy))
         ($struct_type)($(rvars...))
     end
 end
@@ -153,7 +152,7 @@ function gen_writers(convert::Function, types::Array, struct_type, stream::Symbo
         push(xprs, quote
             $pad = StrPack.pad_next($offset, $typ, $strategy)
             if $pad > 0
-                write($stream, fill(uint8(0), $pad))
+                Base.write($stream, fill(uint8(0), $pad))
                 $offset += $pad
             end
             $offset += sizeof($typ)*prod($dims)
@@ -161,10 +160,10 @@ function gen_writers(convert::Function, types::Array, struct_type, stream::Symbo
         push(xprs, if isa(typ, CompositeKind)
             :(pack($stream, getfield($struct, ($fieldnames)[$elnum])))
         elseif dims == 1
-            :(write($stream, ($convert)(getfield($struct, ($fieldnames)[$elnum]))))
+            :(Base.write($stream, ($convert)(getfield($struct, ($fieldnames)[$elnum]))))
         else
             ranges = tuple([1:d for d in dims]...)
-            :(write($stream, map($convert, ref(getfield($struct, ($fieldnames)[$elnum]), ($ranges)...))))
+            :(Base.write($stream, map($convert, ref(getfield($struct, ($fieldnames)[$elnum]), ($ranges)...))))
         end)
     end
     xprs
@@ -176,7 +175,7 @@ function struct_pack(convert, types, struct_type)
     @eval function pack(($out)::IO, ($strategy)::DataAlign, ($struct)::($struct_type))
         $(writers...)
         # tail pad
-        write($out, fill(uint8(0), StrPack.pad_next($offset, $struct_type, $strategy)))
+        Base.write($out, fill(uint8(0), StrPack.pad_next($offset, $struct_type, $strategy)))
     end
 end
 
