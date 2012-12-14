@@ -269,18 +269,6 @@ align_structpack(da::DataAlign, n::Integer) = DataAlign(
     _ -> n,
     )
 
-# is there a more efficient way to do this?
-function merge(a::Dict, b::Dict)
-    c = Dict()
-    for (k, v) in a
-        c[k] = v
-    end
-    for (k, v) in b
-        c[k] = v
-    end
-    c
-end
-
 # provide an alignment table
 align_table(da::DataAlign, ttable::Dict) = DataAlign(
     merge(da.ttable, ttable),
