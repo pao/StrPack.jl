@@ -1,17 +1,16 @@
-strpack.jl --- Convert Julia types <--> C structures
-====================================================
+StrPack.jl --- Structured Stream I/O
+====================================
 
-.. .. module:: strpack.jl
-   :synopsis: Convert Julia types <--> C structures
+.. .. module:: StrPack.jl
+   :synopsis: Structured Stream I/O
 
-This module allows Julia composite types to be converted to a form suitable to pass as a structure input
-to a ``ccall``. It can also convert C-structure outputs back into Julia types.
+This package performs serialization of structures to and deserialization from binary data streams and string objects.
 
 -------
 Example
 -------
 
-Probably the easiest way to see how it works is to try an example. Let's create a C library as follows:
+Let's create a C library as follows:
 
 .. code-block:: c
 
@@ -31,7 +30,9 @@ which on Linux is achieved with ``gcc -fPIC teststruct.c -shared -o libteststruc
 
 Let's also create the Julia analog of this structure::
 
-    type TestStruct
+    using StrPack
+
+    @struct type TestStruct
         int1::Int32
         float1::Float32
     end
@@ -41,8 +42,7 @@ Note that C's ``int`` corresponds to ``Int32``. Let's initialize an object of th
 
     s = TestStruct(-1, 1.2)
     
-Now we load the strpack "module", ``load("strpack")``, which also brings in ``iostring.jl``. We're going to
-pack ``s`` into a form suitable to pass as the input to our C function ``getvalues``, which we do in the
+We can pack ``s`` into a form suitable to pass as the input to our C function ``getvalues``, which we do in the
 following way::
 
     iostr = IOString()
@@ -70,15 +70,22 @@ into a Julia type::
     s2 = unpack(iostr, TestStruct)
 
 Voila! You have the result back.
-    
-.. function:: pack(io, composite[, strategy])
 
-    Create a packed buffer representation of ``composite`` in stream ``io``, using data alignment coded by
-    ``strategy``. This buffer is suitable to pass as a ``struct`` argument in a ``ccall``.
+.. macro:: @struct(type, strategy, endianness)
+
+    Create and register a structural Julia type with StrPack. The type argument uses an extended form of the standard Julia type syntax to define the size of arrays and strings. Each element must declare its type, and each type must be reducible to a bits type or array or composite of bits types.
+
+        @struct type StructuralType
+            a::Float64 # a bits type
+            b::Array{Int32,2}(4, 4) # an array of bits types
+            c::ASCIIString(8) # a string with a fixed number of bytes
+        end
+
+.. function:: pack(io, composite[, asize, strategy, endianness])
+
+    Create a packed buffer representation of ``composite`` in stream ``io``, using array and string sizes fixed by ``asize`` and data alignment coded by ``strategy`` with endianness ``endianness``. If the optional arguments are not provided, then ``composite`` is expected to have been created with the ``@struct`` macro.
     
-.. function:: unpack(io, T[, strategy])
+.. function:: unpack(io, T[, asize, strategy, endianness])
 
     Extract an instance of the Julia composite type ``T`` from the packed representation in the stream ``io``.
-    ``io`` must be positioned at the beginning (using ``seek``). This allows you to read C ``struct`` outputs
-    from ``ccall``.
-
+    If the optional arguments are not provided, then ``composite`` is expected to have been created with the ``@struct`` macro.

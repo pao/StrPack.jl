@@ -1,48 +1,18 @@
 module StrPack
 
-export Struct, struct
+export @struct
 export pack, unpack, sizeof
 export DataAlign
 export align_default, align_packed, align_packmax, align_structpack, align_table
 export align_x86_pc_linux_gnu, align_native
 export show_struct_layout
 
-require("lru.jl")
+using Meta
+
+import Base.read, Base.write
+import Base.isequal
 
 bswap(c::Char) = identity(c) # white lie which won't work for multibyte characters in UTF-16 or UTF-32
-
-# Represents data endianness
-abstract Endianness
-type BigEndian <: Endianness; end
-type LittleEndian <: Endianness; end
-type NativeEndian <: Endianness; end
-
-# Represents a packed composite type
-type Struct
-    canonical::String
-    endianness::Endianness
-    types
-    struct::Type
-end
-function Struct{T}(::Type{T}, endianness)
-    if !isa(T, CompositeKind)
-        error("Type $T is not a composite type.")
-    end
-    if !isbitsequivalent(T)
-        error("Type $T is not bits-equivalent.")
-    end
-    s = canonicalize(T, endianness)
-    if has(STRUCTS, s)
-        return STRUCTS[s]
-    end
-    types = composite_fieldinfo(T)
-    packer, unpacker = endianness_converters(endianness)
-    struct_pack(packer, types, T)
-    struct_unpack(unpacker, types, T)
-    struct_utils(T)
-    STRUCTS[s] = Struct(s, endianness, types, T)
-end
-Struct{T}(::Type{T}) = Struct(T, NativeEndian())
 
 # Represents a particular way of adding bytes to maintain certain alignments
 type DataAlign
@@ -54,24 +24,96 @@ type DataAlign
 end
 DataAlign(def::Function, agg::Function) = DataAlign((Type=>Integer)[], def, agg)
 
-canonicalize(s::String) = replace(s, r"\s|#.*$"m, "")
+type Struct
+    asize::Dict
+    strategy::DataAlign
+    endianness::Symbol
+end
 
-# colons chosen since they are not allowed in struct-format strings or in type names
-canonicalize(t::Type,e::Endianness) = strcat("::", string(t), "::", string(e))
+const STRUCT_REGISTRY = Dict{Type, Struct}()
+
+macro struct(xpr...)
+    (typname, typ, asize) = extract_annotations(xpr[1])
+    if length(xpr) > 3
+        error("too many arguments supplied to @struct")
+    end
+    if length(xpr) > 2
+        if isexpr(xpr[3], :quote) && any(xpr[3] .== keys(endianness_converters))
+            endianness = xpr[3]
+        else
+            error("$(string(xpr[3])) is not a valid endianness")
+        end
+        alignment = xpr[2]
+    elseif length(xpr) > 1
+        if isexpr(xpr[2], :quote) && any(xpr[2] .== keys(endianness_converters))
+            endianness = xpr[2]
+            alignment = :(align_default)
+        else
+            alignment = xpr[2]
+            endianness = :(:NativeEndian)
+        end
+    else
+        alignment = :(align_default)
+        endianness = :(:NativeEndian)
+    end
+    new_struct = :(Struct($asize, $alignment, $endianness))
+    quote
+        $(esc(typ))
+        STRUCT_REGISTRY[$(esc(typname))] = $new_struct
+        # $(expr(:quote, isequal))(a::$(esc(typname)), b::$(esc(typname))) = begin
+        #     for name in $(esc(typname)).names
+        #         if !isequal(getfield(a, name), getfield(b, name))
+        #             return false
+        #         end
+        #     end
+        #     true
+        # end
+    end
+end
+
+headof(xpr, sym) = false
+headof(xpr::Expr, sym) = (xpr.head == sym)
+
+# hmm...AST selectors could be useful
+function extract_annotations(exprIn)
+    fieldnames = Expr[]
+    asizes = Expr[]
+    typname = nothing
+    if isexpr(exprIn, :type)
+        typname = exprIn.args[1]
+        for field_xpr in exprIn.args[2].args
+            if isexpr(field_xpr, :(::)) && isexpr(field_xpr.args[2], :call)
+                push!(fieldnames, quot(field_xpr.args[1]))
+                push!(asizes, quot(Integer[field_xpr.args[2].args[2:end]...]))
+                # turn this back into a legal type expression
+                field_xpr.args[2] = field_xpr.args[2].args[1]
+            end
+        end
+    else
+        error("only type definitions can be supplied to @struct")
+    end
+    asize = :(Dict([$(fieldnames...)], Array{Integer,1}[$(asizes...)]))
+    (typname, exprIn, asize)
+end
+
+endianness_converters = {
+    :BigEndian => (hton, ntoh),
+    :LittleEndian => (htol, ltoh),
+    :NativeEndian => (identity, identity),
+    }
 
 # A byte of padding
 bitstype 8 PadByte
-write(s, x::PadByte) = write(s, uint8(0))
+write(s, x::PadByte) = write(s, 0x00)
 read(s, ::Type{PadByte}) = read(s, Uint8)
 
-
-# TODO Handle strings and arrays
 function isbitsequivalent{T}(::Type{T})
-    if isa(T, BitsKind)
+    if isa(T, BitsKind) || T <: String && !isa(T, AbstractKind)
         return true
     elseif !isa(T, CompositeKind)
         return false
     end
+    # TODO AbstractArray inspect element instead
     for S in T.types
         if !isbitsequivalent(S)
             return false
@@ -79,146 +121,103 @@ function isbitsequivalent{T}(::Type{T})
     end
     true
 end
-isbitsequivalent(struct::Struct) = isbitsequivalent(struct.struct)
 
-function composite_fieldinfo{T}(::Type{T})
-    types = cell(length(T.names))
-    for i in 1:length(T.names)
-        types[i] = T.types[i], 1, T.names[i]
+function chktype{T}(::Type{T})
+    if !isa(T, CompositeKind)
+        error("Type $T is not a composite type.")
     end
-    types
+    if !isbitsequivalent(T)
+        error("Type $T is not bits-equivalent.")
+    end
 end
 
-function calcsize(types)
-    size = 0
-    for (elemtype, dims) in types
-        typ = elemtype <: Array ? eltype(elemtype) : elemtype
-        size += if isa(typ, BitsKind)
-            prod(dims)*sizeof(typ)
-        elseif isa(typ, CompositeKind)
-            prod(dims)*sizeof(Struct(typ))
+function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianness::Symbol)
+    chktype(T)
+    tgtendianness = endianness_converters[endianness][2]
+    offset = 0
+    rvar = Any[]
+    for (typ, name) in zip(T.types, T.names)
+        dims = get(asize, name, 1)
+        intyp = if typ <: AbstractArray
+            eltype(typ)
         else
-            error("Improper type $typ in struct.")
+            typ
+        end
+        offset = skip(in, pad_next(offset, intyp, strategy))
+        offset += if intyp <: String
+            push!(rvar, rstrip(convert(typ, read(in, Uint8, dims...)), "\0"))
+            prod(dims)
+        elseif isa(intyp, CompositeKind)
+            if typ <: AbstractArray
+                item = Array(intyp, dims...)
+                for i in 1:prod(dims)
+                    item[i] = unpack(in, intyp)
+                end
+                push!(rvar, item)
+            else
+                push!(rvar, unpack(in, intyp))
+            end
+            calcsize(intyp)*prod(dims)
+        else
+            if typ <: AbstractArray
+                push!(rvar, map(tgtendianness, read(in, intyp, dims...)))
+            else
+                push!(rvar, map(tgtendianness, read(in, intyp)))
+            end
+            sizeof(intyp)*prod(dims)
         end
     end
-    size
+    skip(in, pad_next(offset, T, strategy))
+    T(rvar...)
+end
+function unpack{T}(in::IO, ::Type{T})
+    reg = STRUCT_REGISTRY[T]
+    unpack(in, T, reg.asize, reg.strategy, reg.endianness)
 end
 
-# Generate an unpack function for a composite type
-function gen_readers(convert::Function, types::Array, stream::Symbol, offset::Symbol, strategy::Symbol)
-    xprs, rvars = {}, {}
-    @gensym pad
-    push(xprs, :($offset = 0))
-    for (typ, dims) in types
-        push(xprs, quote
-            $pad = StrPack.pad_next($offset, $typ, $strategy)
-            if $pad > 0
-                Base.skip($stream, $pad)
-                $offset += $pad
-            end
-            $offset += sizeof($typ)*prod($dims)
-        end)
-        rvar = gensym()
-        push(rvars, rvar)
-        push(xprs, if isa(typ, CompositeKind)
-            :($rvar = unpack($stream, $typ))
-        elseif dims == 1
-            :($rvar = ($convert)(Base.read($stream, $typ)))
+function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endianness::Symbol)
+    chktype(T)
+    tgtendianness = endianness_converters[endianness][1]
+    offset = 0
+    for (typ, name) in zip(T.types, T.names)
+        if typ <: AbstractArray
+            typ = eltype(typ)
+        end
+        data = if typ <: String
+            typ = Uint8
+            convert(Array{Uint8}, getfield(struct, name))
         else
-            :($rvar = map($convert, Base.read($stream, $typ, $dims...)))
-        end)
-    end
-    xprs, rvars
-end
+            getfield(struct, name)
+        end
 
-function struct_unpack(convert, types, struct_type)
-    @gensym in offset strategy
-    readers, rvars = gen_readers(convert, types, in, offset, strategy)
-    @eval function unpack(::Type{$struct_type}, ($in)::IO, ($strategy)::DataAlign)
-        $(readers...)
-        # tail pad
-        Base.skip($in, StrPack.pad_next($offset, $struct_type, $strategy))
-        ($struct_type)($(rvars...))
-    end
-end
+        offset += write(out, zeros(Uint8, pad_next(offset, typ, strategy)))
 
-# Generate a pack function for a composite type
-function gen_writers(convert::Function, types::Array, struct_type, stream::Symbol, struct::Symbol, offset::Symbol, strategy::Symbol)
-    @gensym fieldnames pad
-    xprs = {:(local $fieldnames = $struct_type.names), :($offset = 0)}
-    elnum = 0
-    for (typ, dims) in types
-        elnum += 1
-        push(xprs, quote
-            $pad = StrPack.pad_next($offset, $typ, $strategy)
-            if $pad > 0
-                Base.write($stream, fill(uint8(0), $pad))
-                $offset += $pad
+        numel = prod(get(asize, name, 1))
+        idx_end = numel > 1 ? min(numel, length(data)) : 1
+        if isa(typ, CompositeKind)
+            if typeof(data) <: AbstractArray
+                for i in 1:idx_end
+                    offset += pack(out, data[i])
+                end
+                offset += write(out, zeros(Uint8, calcsize(typ)*(numel-idx_end)))
+            else
+                offset += pack(out, data)
             end
-            $offset += sizeof($typ)*prod($dims)
-        end)
-        push(xprs, if isa(typ, CompositeKind)
-            :(pack($stream, getfield($struct, ($fieldnames)[$elnum])))
-        elseif dims == 1
-            :(Base.write($stream, ($convert)(getfield($struct, ($fieldnames)[$elnum]))))
         else
-            ranges = tuple([1:d for d in dims]...)
-            :(Base.write($stream, map($convert, ref(getfield($struct, ($fieldnames)[$elnum]), ($ranges)...))))
-        end)
+            offset += if idx_end > 1
+                write(out, map(tgtendianness, data[1:idx_end]))
+            else
+                write(out, map(tgtendianness, data))
+            end
+            offset += write(out, zeros(typ, max(numel-idx_end, 0)))
+        end
     end
-    xprs
+    offset += write(out, zeros(Uint8, pad_next(offset, T, strategy)))
 end
-
-function struct_pack(convert, types, struct_type)
-    @gensym out struct offset strategy
-    writers = gen_writers(convert, types, struct_type, out, struct, offset, strategy)
-    @eval function pack(($out)::IO, ($strategy)::DataAlign, ($struct)::($struct_type))
-        $(writers...)
-        # tail pad
-        Base.write($out, fill(uint8(0), StrPack.pad_next($offset, $struct_type, $strategy)))
-    end
+function pack{T}(out::IO, struct::T)
+    reg = STRUCT_REGISTRY[T]
+    pack(out, struct, reg.asize, reg.strategy, reg.endianness)
 end
-
-endianness_converters{T<:Endianness}(::T) = error("endianness type $T not recognized")
-endianness_converters(::BigEndian) = hton, ntoh
-endianness_converters(::LittleEndian) = htol, ltoh
-endianness_converters(::NativeEndian) = identity, identity
-
-function struct_utils(struct_type)
-    @eval ref(struct::($struct_type), i::Integer) = struct.(($struct_type).names[i])
-    @eval ref(struct::($struct_type), x) = [struct.(($struct_type).names[i]) for i in x]
-    @eval length(struct::($struct_type)) = length(($struct_type).names)
-    # this could be better
-    @eval isequal(a::($struct_type), b::($struct_type)) = isequal(a[1:end], b[1:end])
-end
-
-# Structure cache:
-# * a given canonical struct string returns the same struct (until you run out of cache space)
-# * we don't spend time regenerating types and functions when we don't have to
-const STRUCTS = BoundedLRU()
-
-# Julian aliases for the "object-style" calls to pack/unpack/struct
-function pack(out::IO, s::Struct, strategy::DataAlign, struct_or_only_item)
-    if isa(struct_or_only_item, s.struct)
-        pack(out, strategy, struct_or_only_item)
-    else
-        pack(out, strategy, s.struct(struct_or_only_item))
-    end
-end
-pack{T}(out::IO, composite::T, strategy::DataAlign) = pack(out, Struct(T), strategy, composite)
-pack{T}(out::IO, composite::T) = pack(out, Struct(T), align_packed, composite)
-pack(out::IO, s::Struct, strategy::DataAlign, args...) = pack( out, strategy, s.struct(args...))
-pack(out::IO, s::Struct, args...) = pack(out, align_packed, s.struct(args...))
-
-unpack(in::IO, s::Struct, strategy::DataAlign) = unpack(s, in, strategy)
-unpack(in::IO, s::Struct) = unpack(s, in, align_packed)
-unpack{T}(in::IO, ::Type{T}, strategy::DataAlign) = unpack(T, in, strategy)
-unpack{T}(in::IO, ::Type{T}) = unpack(T, in, align_packed)
-
-struct(s::Struct, items...) = s.struct(items...)
-
-sizeof(s::Struct) = calcsize(s.types)
-sizeof(s::Struct, strategy::DataAlign) = calcsize(pad(s, strategy))
 
 # Convenience methods when you just want to use strings
 macro withIOString(iostr, ex)
@@ -228,26 +227,18 @@ macro withIOString(iostr, ex)
         $iostr
     end
 end
-pack(s::Struct, strategy::DataAlign, arg) = @withIOString iostr pack(iostr, s, strategy, arg)
-pack(s::Struct, strategy::DataAlign, args...) = @withIOString iostr pack(iostr, s, strategy, args...)
-pack(composite, strategy) = @withIOString iostr pack(iostr, composite, strategy)
-pack(s::Struct, arg) = @withIOString iostr pack(iostr, s, arg)
-pack(s::Struct, args...) = @withIOString iostr pack(iostr, s, args...)
-pack(composite) = @withIOString iostr pack(iostr, composite)
 
-unpack(str::String, s::Struct) = unpack(IOString(str), s)
-unpack(str::String, ctyp) = unpack(IOString(str), ctyp)
+pack{T}(struct::T, a::Dict, s::DataAlign, n::Symbol) = @withIOString iostr pack(iostr, a, s, n)
+pack{T}(struct::T) = @withIOString iostr pack(iostr, struct)
+
+unpack{T}(str::Union(String, Array{Uint8,1}), ::Type{T}) = unpack(IOString(str), T)
 
 ## Alignment strategies and utility functions ##
 
 # default alignment for bitstype T is nextpow2(sizeof(::Type{T}))
-# TODO: figure out why this can't be done with multiple dispatch
-function type_alignment_default(typ)
-    if typ <: AbstractArray
-        typ = eltype(typ)
-    end
-    nextpow2(sizeof(typ))
-end
+type_alignment_default{T<:AbstractArray}(::Type{T}) = type_alignment_default(eltype(T))
+type_alignment_default{T<:String}(::Type{T}) = 1
+type_alignment_default{T}(::Type{T}) = nextpow2(sizeof(T))
 
 # default strategy
 align_default = DataAlign(type_alignment_default, x -> max(map(type_alignment_default, x)))
@@ -290,20 +281,13 @@ align_x86_pc_linux_gnu = align_table(align_default,
     ])
 
 # Get alignment for a given type
-function alignment_for(strategy::DataAlign, typ::Type)
-    if has(strategy.ttable, typ)
-        strategy.ttable[typ]
-    elseif isa(typ, CompositeKind)
-        strategy.aggregate(map(x->x[1], Struct(typ).types))
+function alignment_for(strategy::DataAlign, T::Type)
+    if has(strategy.ttable, T)
+        strategy.ttable[T]
+    elseif isa(T, CompositeKind)
+        strategy.aggregate(T.types)
     else
-        strategy.default(typ)
-    end
-end
-function alignment_for(strategy::DataAlign, s::Struct)
-    if has(strategy.ttable, s.struct)
-        strategy.ttable[s.struct]
-    else
-        strategy.aggregate(map(x->x[1], s.types))
+        strategy.default(T)
     end
 end
 
@@ -312,66 +296,92 @@ function pad_next(offset, typ, strategy::DataAlign)
     (align_to - offset % align_to) % align_to
 end
 
-function pad(s::Struct, strategy::DataAlign)
-    offset = 0
-    newtypes = {}
-    for (typ, dims) in s.types
-        fix = pad_next(offset, typ, strategy)
-        if fix > 0
-            push(newtypes, (PadByte, fix))
-            offset += fix
+function calcsize{T}(::Type{T}, asize::Dict, strategy::DataAlign)
+    chktype(T)
+    size = 0
+    for (typ, name) in zip(T.types, T.names)
+        dims = get(asize, name, 1)
+        typ = if typ <: Array
+            eltype(typ)
+        elseif typ <: String
+            Uint8
+        else
+            typ
         end
-        push(newtypes, (typ, dims))
-        offset += sizeof(typ) * prod(dims)
+        size += pad_next(size, typ, strategy)
+        size += if isa(typ, BitsKind)
+            prod(dims)*sizeof(typ)
+        elseif isa(typ, CompositeKind)
+            prod(dims)*sizeof(Struct(typ))
+        else
+            error("Improper type $typ in struct.")
+        end
     end
-    fix = pad_next(offset, s, strategy)
-    if fix > 0
-        push(newtypes, (PadByte, fix))
-    end
-    newtypes
+    size += pad_next(size, T, strategy)
+    size
 end
+calcsize{T}(::Type{T}) = calcsize(T, STRUCT_REGISTRY[T].asize, STRUCT_REGISTRY[T].strategy)
 
-function show_struct_layout(s::Struct, strategy::DataAlign, width, bytesize)
+function show_struct_layout{T}(::Type{T}, asize::Dict, strategy::DataAlign, width, bytesize)
+    chktype(T)
     offset = 0
-    for (typ, dims) in pad(s, strategy)
-        for i in 1:prod(dims)
-            tstr = string(typ)
-            tstr = tstr[1:min(sizeof(typ)*bytesize-2, length(tstr))]
-            str = @sprintf("[%s%s]", tstr, "-"^(bytesize*sizeof(typ)-2-length(tstr)))
-            typsize = sizeof(typ)
-            while !isempty(str)
-                if offset % width == 0
-                    @printf("0x%04X ", offset)
-                end
-                len_prn = min(width - (offset % width), typsize)
-                nprint = bytesize*len_prn
-                print(str[1:nprint])
-                str = str[nprint+1:end]
-                typsize -= len_prn
-                offset += len_prn
-                if offset % width == 0
-                    println()
-                end
-            end
+    for (typ, name) in zip(T.types, T.names)
+        dims = get(asize, name, 1)
+        intyp = if typ <: Array
+            eltype(typ)
+        elseif typ <: String
+            Uint8
+        else
+            typ
         end
+        padsize = pad_next(offset, intyp, strategy)
+        offset = show_layout_format(PadByte, sizeof(PadByte), padsize, width, bytesize, offset)
+        offset = show_layout_format(typ, sizeof(intyp), dims, width, bytesize, offset)
     end
+    padsize = pad_next(offset, T, strategy)
+    offset = show_layout_format(PadByte, sizeof(PadByte), padsize, width, bytesize, offset)
     if offset % width != 0
         println()
     end
 end
-show_struct_layout(s::Struct, strategy::DataAlign) = show_struct_layout(s, strategy, 8, 10)
-show_struct_layout(s::Struct, strategy::DataAlign, width) = show_struct_layout(s, strategy, width, 10)
+show_struct_layout{T}(::Type{T}) = show_struct_layout(T, STRUCT_REGISTRY[T].asize, STRUCT_REGISTRY[T].strategy, 8, 10)
+show_struct_layout{T}(::Type{T}, width::Integer, bytesize::Integer) = show_struct_layout(T, STRUCT_REGISTRY[T].asize, STRUCT_REGISTRY[T].strategy, width, bytesize)
+# show_struct_layout(T::Type, asize::Dict, strategy::DataAlign, width) = show_struct_layout(T, strategy, width, 10)
+
+function show_layout_format(typ, typsize, dims, width, bytesize, offset)
+    for i in 1:prod(dims)
+        tstr = string(typ)[1:min(typsize*bytesize-2, end)]
+        str = "[" * tstr * "-"^(bytesize*typsize-2-length(tstr)) * "]"
+        typsize_i = typsize
+        while !isempty(str)
+            if offset % width == 0
+                @printf("0x%04X ", offset)
+            end
+            len_prn = min(width - (offset % width), typsize_i)
+            nprint = bytesize*len_prn
+            print(str[1:nprint])
+            str = str[nprint+1:end]
+            typsize_i -= len_prn
+            offset += len_prn
+            if offset % width == 0
+                println()
+            end
+        end
+    end
+    offset
+end
 
 ## Native layout ##
+const libLLVM = "libLLVM-3.2svn"
 macro llvmalign(tsym)
     quote
-        int(ccall(:LLVMPreferredAlignmentOfType, Uint, (Ptr, Ptr),
-                  tgtdata, ccall($tsym, Ptr, ())))
+        int(ccall((:LLVMPreferredAlignmentOfType, libLLVM), Uint, (Ptr, Ptr),
+                  tgtdata, ccall(($tsym, libLLVM), Ptr, ())))
     end
 end
 
 align_native = align_table(align_default, let
-    tgtdata = ccall(:LLVMCreateTargetData, Ptr, (String,), "")
+    tgtdata = ccall((:LLVMCreateTargetData, libLLVM), Ptr, (String,), "")
 
     int8align = @llvmalign :LLVMInt8Type
     int16align = @llvmalign :LLVMInt16Type
@@ -380,7 +390,7 @@ align_native = align_table(align_default, let
     float32align = @llvmalign :LLVMFloatType
     float64align = @llvmalign :LLVMDoubleType
 
-    ccall(:LLVMDisposeTargetData, Void, (Ptr,), tgtdata)
+    ccall((:LLVMDisposeTargetData, libLLVM), Void, (Ptr,), tgtdata)
 
     [
      Int8 => int8align,
