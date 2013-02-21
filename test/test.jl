@@ -21,19 +21,6 @@ end
     a::Array{C,1}(2)
 end
 
-import Base.isequal
-
-for typname in {:A, :B, :C, :D, :E}
-    @eval function isequal(a::$typname, b::$typname)
-        for name in $typname.names
-            if !isequal(getfield(a, name), getfield(b, name))
-                return false
-            end
-        end
-        true
-    end
-end
-
 function roundtrip(a)
     ios = IOString()
     pack(ios, a)

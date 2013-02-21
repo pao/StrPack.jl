@@ -60,14 +60,15 @@ macro struct(xpr...)
     quote
         $(esc(typ))
         STRUCT_REGISTRY[$(esc(typname))] = $new_struct
-        # $(expr(:quote, isequal))(a::$(esc(typname)), b::$(esc(typname))) = begin
-        #     for name in $(esc(typname)).names
-        #         if !isequal(getfield(a, name), getfield(b, name))
-        #             return false
-        #         end
-        #     end
-        #     true
-        # end
+        const fisequal = isequal
+        fisequal(a::$(esc(typname)), b::$(esc(typname))) = begin
+            for name in $(esc(typname)).names
+                if !isequal(getfield(a, name), getfield(b, name))
+                    return false
+                end
+            end
+            true
+        end
     end
 end
 
