@@ -77,7 +77,7 @@ Macros
 
 .. function:: @struct(type, strategy, endianness)
 
-    Create and register a structural Julia type with StrPack. The type argument uses an extended form of the standard Julia type syntax to define the size of arrays and strings. Each element must declare its type, and each type must be reducible to a bits type or array or composite of bits types.
+    Create and register a structural Julia type with StrPack. The type argument uses an extended form of the standard Julia type syntax to define the size of arrays and strings. Each element must declare its type, and each type must be reducible to a bits type or array or composite of bits types.::
 
         @struct type StructuralType
             a::Float64 # a bits type
@@ -137,7 +137,7 @@ The predefined strategies are:
 ``align_table(ttable)``
     The alignments will be taken from ``ttable``, a ``Dict`` mapping types to alignments in bytes. Otherwise, the default alignment will be used.
 
-The ``align_packmax``, ``align_structpack``, and ``align_table`` strategies can be composed. For example,
+The ``align_packmax``, ``align_structpack``, and ``align_table`` strategies can be composed. For example::
 
     align_structpack(align_table({Special => 2}), 4)
 
