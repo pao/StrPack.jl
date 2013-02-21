@@ -71,7 +71,11 @@ into a Julia type::
 
 Voila! You have the result back.
 
-.. macro:: @struct(type, strategy, endianness)
+------
+Macros
+------
+
+.. function:: @struct(type, strategy, endianness)
 
     Create and register a structural Julia type with StrPack. The type argument uses an extended form of the standard Julia type syntax to define the size of arrays and strings. Each element must declare its type, and each type must be reducible to a bits type or array or composite of bits types.
 
@@ -81,11 +85,66 @@ Voila! You have the result back.
             c::ASCIIString(8) # a string with a fixed number of bytes
         end
 
+-------
+Methods
+-------
+
 .. function:: pack(io, composite[, asize, strategy, endianness])
 
-    Create a packed buffer representation of ``composite`` in stream ``io``, using array and string sizes fixed by ``asize`` and data alignment coded by ``strategy`` with endianness ``endianness``. If the optional arguments are not provided, then ``composite`` is expected to have been created with the ``@struct`` macro.
+    Create a packed buffer representation of ``composite`` in stream ``io``, using array and string sizes fixed by ``asize`` and data alignment coded by ``strategy`` with endianness ``endianness``. If the optional arguments are not provided, then ``T``, the type of ``composite``, is expected to have been created with the ``@struct`` macro.
     
 .. function:: unpack(io, T[, asize, strategy, endianness])
 
     Extract an instance of the Julia composite type ``T`` from the packed representation in the stream ``io``.
-    If the optional arguments are not provided, then ``composite`` is expected to have been created with the ``@struct`` macro.
+    If the optional arguments are not provided, then ``T`` is expected to have been created with the ``@struct`` macro.
+
+.. function:: show_struct_layout(T[, asize, strategy][, width, bytesize])
+
+    Print a graphical representation of the memory layout of the packed type ``T``. If ``asize`` and ``strategy`` are not provided, then ``T`` is expected to have been created with the ``@struct`` macro. The display will show ``width`` bytes in each row, with each byte taking up ``bytesize`` characters.
+
+----------
+Endianness
+----------
+
+StrPack supports both big-endian (also known as network-ordered) and little-endian streams. The symbols ``:BigEndian``, ``:LittleEndian``, and ``:NativeEndian`` can be passed as ``endianness`` arguments in StrPack macros and methods.
+
+------------------
+Packing strategies
+------------------
+
+To support arbitrary ABIs, StrPack defines a number of "packing strategies"--that is, instructions for inserting padding bytes--as well as allowing the user to define their own.
+
+The predefined strategies are:
+
+``align_default``
+    Each bits type is aligned to the next higher power of two. Arrays and structures are aligned to the largest alignment required by any of their members.
+
+``align_packed``
+    No padding is inserted. Equivalent to ``__attribute__ (( __packed__ ))``.
+
+``align_x86_pc_linux_gnu``
+    The x86 Linux ABI, which uses 4 byte alignment for ``Int64``, ``Uint64``, and ``Float64``.
+
+``align_native``
+    The native C ABI specified by the host platform.
+
+``align_packmax(n)``
+    The default alignment is used up to a limit of ``n`` bytes. Equvalent to ``#pragma pack(n)``.
+
+``align_structpack(n)``
+    The default alignment is used for bitstypes, but aggregate types are aligned to ``n`` bytes. Equivalent to ``__attribute__ (( align(n) ))``
+
+``align_table(ttable)``
+    The alignments will be taken from ``ttable``, a ``Dict`` mapping types to alignments in bytes. Otherwise, the default alignment will be used.
+
+The ``align_packmax``, ``align_structpack``, and ``align_table`` strategies can be composed. For example,
+
+    align_structpack(align_table({Special => 2}), 4)
+
+will align structures to 4 bytes, except for ``Special``, which will be aligned to 2 bytes.
+
+Completely custom alignment strategies can be defined by constructing a ``DataAlign`` type.
+
+.. function:: DataAlign([ttable,] default, aggregate)
+
+    Create a padding strategy. ``ttable`` is an optional ``Dict`` mapping types to alignments in bytes. ``default`` is a function from ``Type`` to ``Integer`` which should return the required alignment for bitstypes not in ``ttable``. ``aggregate`` is a function from ``Vector{Type}`` to ``Integer`` which should return the requirement for composite (also known as structure or aggreggate) types.
