@@ -373,37 +373,24 @@ function show_layout_format(typ, typsize, dims, width, bytesize, offset)
 end
 
 ## Native layout ##
-const libLLVM = "libLLVM-3.2svn"
-macro llvmalign(tsym)
-    quote
-        int(ccall((:LLVMPreferredAlignmentOfType, libLLVM), Uint, (Ptr, Ptr),
-                  tgtdata, ccall(($tsym, libLLVM), Ptr, ())))
-    end
-end
-
 align_native = align_table(align_default, let
-    tgtdata = ccall((:LLVMCreateTargetData, libLLVM), Ptr, (String,), "")
+    i8a, i16a, i32a, i64a, f32a, f64a = Array(Uint, 1), Array(Uint, 1), Array(Uint, 1), Array(Uint, 1), Array(Uint, 1), Array(Uint, 1)
 
-    int8align = @llvmalign :LLVMInt8Type
-    int16align = @llvmalign :LLVMInt16Type
-    int32align = @llvmalign :LLVMInt32Type
-    int64align = @llvmalign :LLVMInt64Type
-    float32align = @llvmalign :LLVMFloatType
-    float64align = @llvmalign :LLVMDoubleType
-
-    ccall((:LLVMDisposeTargetData, libLLVM), Void, (Ptr,), tgtdata)
+    ccall("jl_native_alignment", Void,
+          (Ptr{Uint}, Ptr{Uint}, Ptr{Uint}, Ptr{Uint}, Ptr{Uint}, Ptr{Uint}),
+          i8a, i16a, i32a, i64a, f32a, f64a)
 
     [
-     Int8 => int8align,
-     Uint8 => int8align,
-     Int16 => int16align,
-     Uint16 => int16align,
-     Int32 => int32align,
-     Uint32 => int32align,
-     Int64 => int64align,
-     Uint64 => int64align,
-     Float32 => float32align,
-     Float64 => float64align,
+     Int8 => i8a[1],
+     Uint8 => i8a[1],
+     Int16 => i16a[1],
+     Uint16 => i16a[1],
+     Int32 => i32a[1],
+     Uint32 => i32a[1],
+     Int64 => i64a[1],
+     Uint64 => i64a[1],
+     Float32 => f32a[1],
+     Float64 => f64a[1],
      ]
 end)
 
