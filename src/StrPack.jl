@@ -15,7 +15,7 @@ import Base.isequal
 bswap(c::Char) = identity(c) # white lie which won't work for multibyte characters in UTF-16 or UTF-32
 
 # Represents a particular way of adding bytes to maintain certain alignments
-type DataAlign
+immutable DataAlign
     ttable::Dict
     # default::(Type -> Integer); used for bits types not in ttable
     default::Function
@@ -24,7 +24,7 @@ type DataAlign
 end
 DataAlign(def::Function, agg::Function) = DataAlign((Type=>Integer)[], def, agg)
 
-type Struct
+immutable Struct
     asize::Dict
     strategy::DataAlign
     endianness::Symbol
@@ -81,8 +81,8 @@ function extract_annotations(exprIn)
     asizes = Expr[]
     typname = nothing
     if isexpr(exprIn, :type)
-        typname = exprIn.args[1]
-        for field_xpr in exprIn.args[2].args
+        typname = exprIn.args[2]
+        for field_xpr in exprIn.args[3].args
             if isexpr(field_xpr, :(::)) && isexpr(field_xpr.args[2], :call)
                 push!(fieldnames, quot(field_xpr.args[1]))
                 push!(asizes, quot(Integer[field_xpr.args[2].args[2:end]...]))
@@ -109,13 +109,16 @@ write(s, x::PadByte) = write(s, 0x00)
 read(s, ::Type{PadByte}) = read(s, Uint8)
 
 function isbitsequivalent{T}(::Type{T})
-    if isa(T, BitsKind) || T <: String && !isa(T, AbstractKind)
+    if isbits(T) || T <: String && !T.abstract
         return true
-    elseif !isa(T, CompositeKind)
+    elseif isempty(T.names)
         return false
     end
     # TODO AbstractArray inspect element instead
     for S in T.types
+        if S <: AbstractArray
+            S = eltype(S)
+        end
         if !isbitsequivalent(S)
             return false
         end
@@ -124,8 +127,8 @@ function isbitsequivalent{T}(::Type{T})
 end
 
 function chktype{T}(::Type{T})
-    if !isa(T, CompositeKind)
-        error("Type $T is not a composite type.")
+    if isempty(T.names)
+        error("Type $T is not an aggregate type.")
     end
     if !isbitsequivalent(T)
         error("Type $T is not bits-equivalent.")
@@ -148,7 +151,7 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
         offset += if intyp <: String
             push!(rvar, rstrip(convert(typ, read(in, Uint8, dims...)), "\0"))
             prod(dims)
-        elseif isa(intyp, CompositeKind)
+        elseif !isempty(intyp.names)
             if typ <: AbstractArray
                 item = Array(intyp, dims...)
                 for i in 1:prod(dims)
@@ -195,7 +198,7 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
 
         numel = prod(get(asize, name, 1))
         idx_end = numel > 1 ? min(numel, length(data)) : 1
-        if isa(typ, CompositeKind)
+        if !isempty(typ.names)
             if typeof(data) <: AbstractArray
                 for i in 1:idx_end
                     offset += pack(out, data[i])
@@ -285,7 +288,7 @@ align_x86_pc_linux_gnu = align_table(align_default,
 function alignment_for(strategy::DataAlign, T::Type)
     if has(strategy.ttable, T)
         strategy.ttable[T]
-    elseif isa(T, CompositeKind)
+    elseif !isempty(T.names)
         strategy.aggregate(T.types)
     else
         strategy.default(T)
@@ -310,9 +313,9 @@ function calcsize{T}(::Type{T}, asize::Dict, strategy::DataAlign)
             typ
         end
         size += pad_next(size, typ, strategy)
-        size += if isa(typ, BitsKind)
+        size += if isbits(typ)
             prod(dims)*sizeof(typ)
-        elseif isa(typ, CompositeKind)
+        elseif !isempty(typ.names)
             prod(dims)*sizeof(Struct(typ))
         else
             error("Improper type $typ in struct.")

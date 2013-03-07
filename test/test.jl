@@ -21,6 +21,10 @@ end
     a::Array{C,1}(2)
 end
 
+@struct immutable F
+    a::Array{Float64,2}(3,2)
+end
+
 function roundtrip(a)
     ios = IOString()
     pack(ios, a)
@@ -44,3 +48,5 @@ end
 
 @test !roundtrip(E([C("a")]))
 @test roundtrip(E([C("a"); C("b")]))
+
+@test roundtrip(F([1. 2.; 3. 4.; 5. 6.]))
