@@ -147,7 +147,7 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
         else
             typ
         end
-        offset = skip(in, pad_next(offset, intyp, strategy))
+        offset = skip(in, pad_next(offset, intyp, strategy)) - 1
         offset += if intyp <: String
             push!(rvar, rstrip(convert(typ, read(in, Uint8, dims...)), "\0"))
             prod(dims)
@@ -166,7 +166,7 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
             if typ <: AbstractArray
                 push!(rvar, map(tgtendianness, read(in, intyp, dims...)))
             else
-                push!(rvar, map(tgtendianness, read(in, intyp)))
+                push!(rvar, tgtendianness(read(in, intyp)))
             end
             sizeof(intyp)*prod(dims)
         end
@@ -208,10 +208,10 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
                 offset += pack(out, data)
             end
         else
-            offset += if idx_end > 1
+            offset += if typeof(data) <: AbstractArray
                 write(out, map(tgtendianness, data[1:idx_end]))
             else
-                write(out, map(tgtendianness, data))
+                write(out, tgtendianness(data))
             end
             offset += write(out, zeros(typ, max(numel-idx_end, 0)))
         end

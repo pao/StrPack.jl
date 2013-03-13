@@ -25,6 +25,11 @@ end
     a::Array{Float64,2}(3,2)
 end
 
+@struct type Hvl_t
+    len::Csize_t
+    p::Ptr{Void}
+end
+
 function roundtrip(a)
     ios = IOString()
     pack(ios, a)
@@ -50,3 +55,5 @@ end
 @test roundtrip(E([C("a"); C("b")]))
 
 @test roundtrip(F([1. 2.; 3. 4.; 5. 6.]))
+
+@test roundtrip(Hvl_t(uint64(0), ccall(:jl_environ, Ptr{Void}, (Int,), 0)))
