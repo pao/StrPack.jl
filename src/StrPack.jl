@@ -105,8 +105,8 @@ endianness_converters = {
 
 # A byte of padding
 bitstype 8 PadByte
-write(s, x::PadByte) = write(s, 0x00)
-read(s, ::Type{PadByte}) = read(s, Uint8)
+write(s::IO, x::PadByte) = write(s, 0x00)
+read(s::IO, ::Type{PadByte}) = read(s, Uint8)
 
 function isbitsequivalent{T}(::Type{T})
     if isbits(T) || T <: String && !T.abstract
