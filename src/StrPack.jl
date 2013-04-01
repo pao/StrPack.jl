@@ -153,7 +153,6 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
         else
             typ
         end
-        offset = skip(in, pad_next(offset, intyp, strategy)) - 1
         offset += if intyp <: String
             push!(rvar, rstrip(convert(typ, read(in, Uint8, dims...)), "\0"))
             prod(dims)
