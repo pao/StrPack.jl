@@ -81,7 +81,13 @@ function extract_annotations(exprIn)
     asizes = Expr[]
     typname = nothing
     if isexpr(exprIn, :type)
-        typname = exprIn.args[2]
+        if isa(exprIn.args[2],Symbol)
+            typname = exprIn.args[2]
+        elseif isexpr(exprIn.args[2],:<:)
+            typname = exprIn.args[2].args[1]
+        else
+            error("Unable to extract type name!")
+        end
         for field_xpr in exprIn.args[3].args
             if isexpr(field_xpr, :(::)) && isexpr(field_xpr.args[2], :call)
                 push!(fieldnames, quot(field_xpr.args[1]))
@@ -147,7 +153,11 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
         else
             typ
         end
-        offset = skip(in, pad_next(offset, intyp, strategy)) - 1
+
+        # Skip padding before next field
+        pad = pad_next(offset,intyp,strategy) 
+        skip(in,pad)
+        offset += pad
         offset += if intyp <: String
             push!(rvar, rstrip(convert(typ, read(in, Uint8, dims...)), "\0"))
             prod(dims)
@@ -173,6 +183,10 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
     end
     skip(in, pad_next(offset, T, strategy))
     T(rvar...)
+end
+function unpack{T}(in::IO, ::Type{T}, endianness::Symbol)
+    reg = STRUCT_REGISTRY[T]
+    unpack(in, T, reg.asize, reg.strategy, endianness)
 end
 function unpack{T}(in::IO, ::Type{T})
     reg = STRUCT_REGISTRY[T]
@@ -217,6 +231,10 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
         end
     end
     offset += write(out, zeros(Uint8, pad_next(offset, T, strategy)))
+end
+function pack{T}(out::IO, struct::T, endianness::Symbol)
+    reg = STRUCT_REGISTRY[T]
+    pack(out, struct, reg.asize, reg.strategy, endianness)
 end
 function pack{T}(out::IO, struct::T)
     reg = STRUCT_REGISTRY[T]
