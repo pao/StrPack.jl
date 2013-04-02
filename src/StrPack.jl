@@ -153,6 +153,11 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
         else
             typ
         end
+
+        # Skip padding before next field
+        pad = pad_next(offset,intyp,strategy) 
+        skip(in,pad)
+        offset += pad
         offset += if intyp <: String
             push!(rvar, rstrip(convert(typ, read(in, Uint8, dims...)), "\0"))
             prod(dims)
