@@ -7,7 +7,7 @@ export align_default, align_packed, align_packmax, align_structpack, align_table
 export align_x86_pc_linux_gnu, align_native
 export show_struct_layout
 
-using Meta
+using Base.Meta
 
 import Base.read, Base.write
 import Base.isequal
