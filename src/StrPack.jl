@@ -38,14 +38,14 @@ macro struct(xpr...)
         error("too many arguments supplied to @struct")
     end
     if length(xpr) > 2
-        if isexpr(xpr[3], :quote) && any(xpr[3] .== keys(endianness_converters))
+        if isexpr(xpr[3], :quote) && has(endianness_converters, eval(xpr[3]))
             endianness = xpr[3]
         else
             error("$(string(xpr[3])) is not a valid endianness")
         end
         alignment = xpr[2]
     elseif length(xpr) > 1
-        if isexpr(xpr[2], :quote) && any(xpr[2] .== keys(endianness_converters))
+        if isexpr(xpr[2], :quote) && has(endianness_converters, eval(xpr[2]))
             endianness = xpr[2]
             alignment = :(align_default)
         else
