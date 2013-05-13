@@ -38,14 +38,14 @@ macro struct(xpr...)
         error("too many arguments supplied to @struct")
     end
     if length(xpr) > 2
-        if isexpr(xpr[3], :quote) && has(endianness_converters, eval(xpr[3]))
+        if isexpr(xpr[3], :quote) && haskey(endianness_converters, eval(xpr[3]))
             endianness = xpr[3]
         else
             error("$(string(xpr[3])) is not a valid endianness")
         end
         alignment = xpr[2]
     elseif length(xpr) > 1
-        if isexpr(xpr[2], :quote) && has(endianness_converters, eval(xpr[2]))
+        if isexpr(xpr[2], :quote) && haskey(endianness_converters, eval(xpr[2]))
             endianness = xpr[2]
             alignment = :(align_default)
         else
@@ -304,7 +304,7 @@ align_x86_pc_linux_gnu = align_table(align_default,
 
 # Get alignment for a given type
 function alignment_for(strategy::DataAlign, T::Type)
-    if has(strategy.ttable, T)
+    if haskey(strategy.ttable, T)
         strategy.ttable[T]
     elseif !isempty(T.names)
         strategy.aggregate(T.types)
