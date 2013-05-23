@@ -159,7 +159,7 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
         skip(in,pad)
         offset += pad
         offset += if intyp <: String
-            push!(rvar, rstrip(convert(typ, read(in, Uint8, dims...)), "\0"))
+            push!(rvar, rstrip(convert(typ, read(in, Uint8, dims...)), ['\0']))
             prod(dims)
         elseif !isempty(intyp.names)
             if typ <: AbstractArray
