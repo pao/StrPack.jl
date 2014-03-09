@@ -263,7 +263,7 @@ type_alignment_default{T<:String}(::Type{T}) = 1
 type_alignment_default{T}(::Type{T}) = nextpow2(sizeof(T))
 
 # default strategy
-align_default = DataAlign(type_alignment_default, x -> max(map(type_alignment_default, x)))
+align_default = DataAlign(type_alignment_default, x -> maximum(map(type_alignment_default, x)))
 
 # equivalent to __attribute__ (( __packed__ ))
 align_packed = DataAlign(_ -> 1, _ -> 1)
