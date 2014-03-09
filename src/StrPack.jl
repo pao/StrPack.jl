@@ -223,7 +223,7 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
             end
         else
             offset += if typeof(data) <: AbstractArray
-                write(out, map(tgtendianness, data[1:idx_end]))
+                isempty(data) ? 0 : write(out, map(tgtendianness, data[1:idx_end]))
             else
                 write(out, tgtendianness(data))
             end
