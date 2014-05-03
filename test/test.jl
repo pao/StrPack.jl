@@ -41,7 +41,7 @@ end
 end
 
 function roundtrip(a)
-    ios = IOString()
+    ios = IOBuffer()
     pack(ios, a)
     seek(ios, 0)
     isequal(a, unpack(ios, typeof(a)))

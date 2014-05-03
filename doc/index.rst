@@ -45,13 +45,13 @@ Note that C's ``int`` corresponds to ``Int32``. Let's initialize an object of th
 We can pack ``s`` into a form suitable to pass as the input to our C function ``getvalues``, which we do in the
 following way::
 
-    iostr = IOString()
+    iostr = IOBuffer()
     pack(iostr, s)
 
 It's worth seeing what has happened here::
 
     julia> iostr
-    IOString([0xff, 0xff, 0xff, 0xff, 0x9a, 0x99, 0x99, 0x3f],9)
+    IOBuffer([0xff, 0xff, 0xff, 0xff, 0x9a, 0x99, 0x99, 0x3f],9)
 
 The first 4 bytes correspond to the ``Int32`` representation of -1, and the last 4 to the ``Float32``
 representation of 1.2. In other words, this is just a packed memory buffer encoding ``s``. (There are

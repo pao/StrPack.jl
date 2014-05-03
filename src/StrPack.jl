@@ -242,18 +242,18 @@ function pack{T}(out::IO, struct::T)
 end
 
 # Convenience methods when you just want to use strings
-macro withIOString(iostr, ex)
+macro withIOBuffer(iostr, ex)
     quote
-        $iostr = IOString()
+        $iostr = IOBuffer()
         $ex
         $iostr
     end
 end
 
-pack{T}(struct::T, a::Dict, s::DataAlign, n::Symbol) = @withIOString iostr pack(iostr, a, s, n)
-pack{T}(struct::T) = @withIOString iostr pack(iostr, struct)
+pack{T}(struct::T, a::Dict, s::DataAlign, n::Symbol) = @withIOBuffer iostr pack(iostr, a, s, n)
+pack{T}(struct::T) = @withIOBuffer iostr pack(iostr, struct)
 
-unpack{T}(str::Union(String, Array{Uint8,1}), ::Type{T}) = unpack(IOString(str), T)
+unpack{T}(str::Union(String, Array{Uint8,1}), ::Type{T}) = unpack(IOBuffer(str), T)
 
 ## Alignment strategies and utility functions ##
 
