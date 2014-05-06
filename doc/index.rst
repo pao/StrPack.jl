@@ -36,7 +36,10 @@ Let's also create the Julia analog of this structure::
         int1::Int32
         float1::Float32
     end
-    TestStruct(i, f) = TestStruct(convert(Int32, i), convert(Float32, f))
+    #define a convenience constructor for 0.2 versions of Julia (in 0.3 this is automatic)
+    if VERSION < v"0.3.0-pre"
+      TestStruct(i, f) = TestStruct(convert(Int32, i), convert(Float32, f))
+    end
 
 Note that C's ``int`` corresponds to ``Int32``. Let's initialize an object of this type::
 
