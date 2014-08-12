@@ -185,10 +185,12 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
     T(rvar...)
 end
 function unpack{T}(in::IO, ::Type{T}, endianness::Symbol)
+    chktype(T)
     reg = STRUCT_REGISTRY[T]
     unpack(in, T, reg.asize, reg.strategy, endianness)
 end
 function unpack{T}(in::IO, ::Type{T})
+    chktype(T)
     reg = STRUCT_REGISTRY[T]
     unpack(in, T, reg.asize, reg.strategy, reg.endianness)
 end
@@ -233,10 +235,12 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
     offset += write(out, zeros(Uint8, pad_next(offset, T, strategy)))
 end
 function pack{T}(out::IO, struct::T, endianness::Symbol)
+    chktype(T)
     reg = STRUCT_REGISTRY[T]
     pack(out, struct, reg.asize, reg.strategy, endianness)
 end
 function pack{T}(out::IO, struct::T)
+    chktype(T)
     reg = STRUCT_REGISTRY[T]
     pack(out, struct, reg.asize, reg.strategy, reg.endianness)
 end
