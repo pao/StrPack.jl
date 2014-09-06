@@ -26,6 +26,7 @@ DataAlign(def::Function, agg::Function) = DataAlign((Type=>Integer)[], def, agg)
 
 immutable Struct
     asize::Dict
+    bsize::Dict
     strategy::DataAlign
     endianness::Symbol
 end
@@ -33,7 +34,7 @@ end
 const STRUCT_REGISTRY = Dict{Type, Struct}()
 
 macro struct(xpr...)
-    (typname, typ, asize) = extract_annotations(xpr[1])
+    (typname, typ, asize, bsize) = extract_annotations(xpr[1])
     if length(xpr) > 3
         error("too many arguments supplied to @struct")
     end
@@ -56,7 +57,7 @@ macro struct(xpr...)
         alignment = :(align_default)
         endianness = :(:NativeEndian)
     end
-    new_struct = :(Struct($asize, $alignment, $endianness))
+    new_struct = :(Struct($asize, $bsize, $alignment, $endianness))
     quote
         $(esc(typ))
         STRUCT_REGISTRY[$(esc(typname))] = $new_struct
@@ -72,13 +73,10 @@ macro struct(xpr...)
     end
 end
 
-headof(xpr, sym) = false
-headof(xpr::Expr, sym) = (xpr.head == sym)
-
 # hmm...AST selectors could be useful
 function extract_annotations(exprIn)
-    fieldnames = Expr[]
     asizes = Expr[]
+    bsizes = Expr[]
     typname = nothing
     if isexpr(exprIn, :type)
         if isa(exprIn.args[2],Symbol)
@@ -89,18 +87,26 @@ function extract_annotations(exprIn)
             error("Unable to extract type name!")
         end
         for field_xpr in exprIn.args[3].args
-            if isexpr(field_xpr, :(::)) && isexpr(field_xpr.args[2], :call)
-                push!(fieldnames, quot(field_xpr.args[1]))
-                push!(asizes, quot(Integer[field_xpr.args[2].args[2:end]...]))
-                # turn this back into a legal type expression
-                field_xpr.args[2] = field_xpr.args[2].args[1]
+            if isexpr(field_xpr, :(::))
+                # first get and unwrap array size
+                if isexpr(field_xpr.args[2], :call)
+                    push!(asizes, quot((field_xpr.args[1], Any[field_xpr.args[2].args[2:end]...])))
+                    field_xpr.args[2] = field_xpr.args[2].args[1]
+
+                end
+                # then get and unwrap bit width
+                if isexpr(field_xpr.args[2], :ref)
+                    push!(bsizes, quot((field_xpr.args[1], field_xpr.args[2].args[2])))
+                    field_xpr.args[2] = field_xpr.args[2].args[1]
+                end
             end
         end
     else
         error("only type definitions can be supplied to @struct")
     end
-    asize = :(Dict([$(fieldnames...)], Array{Integer,1}[$(asizes...)]))
-    (typname, exprIn, asize)
+    asize = !isempty(asizes) ? :(Dict([$(asizes...)])) : :(Dict())
+    bsize = !isempty(bsizes) ? :(Dict([$(bsizes...)])) : :(Dict())
+    (typname, exprIn, asize, bsize)
 end
 
 endianness_converters = {
@@ -148,6 +154,12 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
     rvar = Any[]
     for (typ, name) in zip(T.types, T.names)
         dims = get(asize, name, 1)
+        # process backreferences
+        for (idx, dim) in enumerate(dims)
+            if isa(dim, Symbol)
+                dims[idx] = rvar[findfirst(T.names, dim)]
+            end
+        end
         intyp = if typ <: AbstractArray
             eltype(typ)
         else
@@ -155,7 +167,7 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
         end
 
         # Skip padding before next field
-        pad = pad_next(offset,intyp,strategy) 
+        pad = pad_next(offset,intyp,strategy)
         skip(in,pad)
         offset += pad
         offset += if intyp <: String
@@ -212,6 +224,13 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
 
         offset += write(out, zeros(Uint8, pad_next(offset, typ, strategy)))
 
+        # process backreferences
+        dims = get(asize, name, 1)
+        for (idx, dim) in enumerate(dims)
+            if isa(dim, Symbol)
+                dims[idx] = getfield(struct, dim)
+            end
+        end
         numel = prod(get(asize, name, 1))
         idx_end = numel > 1 ? min(numel, length(data)) : 1
         if !isempty(typ.names)

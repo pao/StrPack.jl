@@ -40,6 +40,11 @@ end
     p::Ptr{Void}
 end
 
+@struct type Backref
+    sz::Csize_t
+    el::Array{Uint8,1}(sz)
+end
+
 function roundtrip(a)
     ios = IOBuffer()
     pack(ios, a)
@@ -70,3 +75,6 @@ end
 @test roundtrip(G2(uint8(0)))
 
 @test roundtrip(Hvl_t(uint64(0), ccall(:jl_environ, Ptr{Void}, (Int,), 0)))
+
+@test roundtrip(Backref(4, [0x01; 0x03; 0x05; 0x07]))
+@test !roundtrip(Backref(6, [0x01; 0x03; 0x05; 0x07; 0x09]))
