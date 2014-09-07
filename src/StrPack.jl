@@ -58,6 +58,7 @@ macro struct(xpr...)
         endianness = :(:NativeEndian)
     end
     new_struct = :(Struct($asize, $bsize, $alignment, $endianness))
+
     quote
         $(esc(typ))
         STRUCT_REGISTRY[$(esc(typname))] = $new_struct
@@ -78,6 +79,7 @@ function extract_annotations(exprIn)
     asizes = Expr[]
     bsizes = Expr[]
     typname = nothing
+    fieldnames = Symbol[]
     if isexpr(exprIn, :type)
         if isa(exprIn.args[2],Symbol)
             typname = exprIn.args[2]
@@ -99,8 +101,12 @@ function extract_annotations(exprIn)
                     push!(bsizes, quot((field_xpr.args[1], field_xpr.args[2].args[2])))
                     field_xpr.args[2] = field_xpr.args[2].args[1]
                 end
+                push!(fieldnames, field_xpr.args[1])
             end
         end
+        # generate the default constructor and an empty constructor
+        push!(exprIn.args[3].args, :($typname($(fieldnames...)) = new($(fieldnames...))))
+        push!(exprIn.args[3].args, :($typname() = new()))
     else
         error("only type definitions can be supplied to @struct")
     end
@@ -147,17 +153,16 @@ function chktype{T}(::Type{T})
     end
 end
 
-function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianness::Symbol)
+function unpack!{T}(dst::T, in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianness::Symbol)
     chktype(T)
     tgtendianness = endianness_converters[endianness][2]
     offset = 0
-    rvar = Any[]
     for (typ, name) in zip(T.types, T.names)
         dims = get(asize, name, 1)
         # process backreferences
         for (idx, dim) in enumerate(dims)
             if isa(dim, Symbol)
-                dims[idx] = rvar[findfirst(T.names, dim)]
+                dims[idx] = dst.(name)
             end
         end
         intyp = if typ <: AbstractArray
@@ -171,7 +176,7 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
         skip(in,pad)
         offset += pad
         offset += if intyp <: String
-            push!(rvar, rstrip(convert(typ, read(in, Uint8, dims...)), ['\0']))
+            dst.(name) = rstrip(convert(typ, read(in, Uint8, dims...)), ['\0'])
             prod(dims)
         elseif !isempty(intyp.names)
             if typ <: AbstractArray
@@ -179,23 +184,27 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
                 for i in 1:prod(dims)
                     item[i] = unpack(in, intyp)
                 end
-                push!(rvar, item)
+                dst.(name) = item
             else
-                push!(rvar, unpack(in, intyp))
+                dst.(name) = unpack(in, intyp)
             end
             calcsize(intyp)*prod(dims)
         else
             if typ <: AbstractArray
-                push!(rvar, map(tgtendianness, read(in, intyp, dims...)))
+                dst.(name) = map(tgtendianness, read(in, intyp, dims...))
             else
-                push!(rvar, tgtendianness(read(in, intyp)))
+                dst.(name) = tgtendianness(read(in, intyp))
             end
             sizeof(intyp)*prod(dims)
         end
     end
     skip(in, pad_next(offset, T, strategy))
-    T(rvar...)
+    dst
 end
+function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianness::Symbol)
+    unpack!(T(), in, T, asize, strategy, endianness)
+end
+
 function unpack{T}(in::IO, ::Type{T}, endianness::Symbol)
     chktype(T)
     reg = STRUCT_REGISTRY[T]
