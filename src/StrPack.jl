@@ -1,7 +1,7 @@
 module StrPack
 
 export @struct
-export pack, unpack, sizeof
+export pack, unpack!, unpack, sizeof
 export DataAlign
 export align_default, align_packed, align_packmax, align_structpack, align_table
 export align_x86_pc_linux_gnu, align_native
@@ -34,7 +34,7 @@ end
 const STRUCT_REGISTRY = Dict{Type, Struct}()
 
 macro struct(xpr...)
-    (typname, typ, asize, bsize) = extract_annotations(xpr[1])
+    (typname, typdef, asize, bsize) = extract_annotations(xpr[1])
     if length(xpr) > 3
         error("too many arguments supplied to @struct")
     end
@@ -60,7 +60,7 @@ macro struct(xpr...)
     new_struct = :(Struct($asize, $bsize, $alignment, $endianness))
 
     quote
-        $(esc(typ))
+        $(esc(typdef))
         STRUCT_REGISTRY[$(esc(typname))] = $new_struct
         const fisequal = isequal
         fisequal(a::$(esc(typname)), b::$(esc(typname))) = begin
@@ -71,6 +71,7 @@ macro struct(xpr...)
             end
             true
         end
+        eval(StrPack, gen_unpack($(esc(typname)), $asize))
     end
 end
 
@@ -153,67 +154,145 @@ function chktype{T}(::Type{T})
     end
 end
 
-function unpack!{T}(dst::T, in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianness::Symbol)
+## function unpack!{T}(dst::T, inp::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianness::Symbol)
+##     chktype(T)
+##     tgtendianness = endianness_converters[endianness][2]
+##     offset = 0
+##     for (typ, name) in zip(T.types, T.names)
+##         dims = get(asize, name, 1)
+##         # process backreferences
+##         for (idx, dim) in enumerate(dims)
+##             if isa(dim, Symbol)
+##                 dims[idx] = dst.(name)
+##             end
+##         end
+##         intyp = if typ <: AbstractArray
+##             eltype(typ)
+##         else
+##             typ
+##         end
+
+##         # Skip padding before next field
+##         pad = pad_next(offset,intyp,strategy)
+##         skip(inp,pad)
+##         offset += pad
+##         offset += if intyp <: String
+##             dst.(name) = rstrip(convert(typ, read(inp, Uint8, dims...)), ['\0'])
+##             prod(dims)
+##         elseif !isempty(intyp.names)
+##             if typ <: AbstractArray
+##                 item = Array(intyp, dims...)
+##                 for i in 1:prod(dims)
+##                     item[i] = unpack(inp, intyp)
+##                 end
+##                 dst.(name) = item
+##             else
+##                 dst.(name) = unpack(inp, intyp)
+##             end
+##             calcsize(intyp)*prod(dims)
+##         else
+##             if typ <: AbstractArray
+##                 dst.(name) = map(tgtendianness, read(inp, intyp, dims...))
+##             else
+##                 dst.(name) = tgtendianness(read(inp, intyp))
+##             end
+##             sizeof(intyp)*prod(dims)
+##         end
+##     end
+##     skip(inp, pad_next(offset, T, strategy))
+##     dst
+## end
+
+function gen_unpack(T, asize)
     chktype(T)
-    tgtendianness = endianness_converters[endianness][2]
-    offset = 0
+    exprs = Expr[]
+    # we need the next two to manage gensyms and backrefs for immutables
+    tmpnames = Symbol[]
+    tmpname_refs = Dict{Symbol, Symbol}()
+    push!(exprs, quote
+        tgtendianness = endianness_converters[endianness][2]
+        offset = 0
+    end)
     for (typ, name) in zip(T.types, T.names)
-        dims = get(asize, name, 1)
-        # process backreferences
+        dims = copy(get(asize, name, 1))
+        if T.mutable
+            dst = :(dst.$name)
+        else
+            dst = gensym(string(name))
+            push!(tmpnames, dst)
+            tmpname_refs[name] = dst
+        end
         for (idx, dim) in enumerate(dims)
             if isa(dim, Symbol)
-                dims[idx] = dst.(name)
+                dims[idx] = T.mutable ? :(dst.$dim) : :($(tmpname_refs[dim]))
             end
         end
-        intyp = if typ <: AbstractArray
-            eltype(typ)
-        else
-            typ
-        end
-
-        # Skip padding before next field
-        pad = pad_next(offset,intyp,strategy)
-        skip(in,pad)
-        offset += pad
-        offset += if intyp <: String
-            dst.(name) = rstrip(convert(typ, read(in, Uint8, dims...)), ['\0'])
-            prod(dims)
+        intyp = (typ <: AbstractArray) ? eltype(typ) : typ
+        push!(exprs, quote
+            pad = pad_next(offset, $intyp, strategy)
+            skip(inp, pad)
+            offset += pad
+        end)
+        if intyp <: String
+            push!(exprs, quote
+                $dst = rstrip(convert($typ, read(inp, Uint8, $(dims...))), ['\0'])
+                offset += *($(dims...))
+            end)
         elseif !isempty(intyp.names)
             if typ <: AbstractArray
-                item = Array(intyp, dims...)
-                for i in 1:prod(dims)
-                    item[i] = unpack(in, intyp)
-                end
-                dst.(name) = item
+                # we generate a unique symbol here to maintain type stability in the generated fn
+                @gensym tmp
+                push!(exprs, quote
+                    $tmp = Array($intyp, $(dims...))
+                    for i in 1:length($tmp)
+                        ($tmp)[i] = unpack(inp, $intyp)
+                    end
+                    $dst = $tmp
+                end)
             else
-                dst.(name) = unpack(in, intyp)
+                push!(exprs, :($dst = unpack(inp, $intyp)))
             end
-            calcsize(intyp)*prod(dims)
+            push!(exprs, :(offset += calcsize($intyp)* *($(dims...))))
         else
             if typ <: AbstractArray
-                dst.(name) = map(tgtendianness, read(in, intyp, dims...))
+                push!(exprs, :($dst = map(tgtendianness, read(inp, $intyp, $(dims...)))))
             else
-                dst.(name) = tgtendianness(read(in, intyp))
+                push!(exprs, :($dst = tgtendianness(read(inp, $intyp))))
             end
-            sizeof(intyp)*prod(dims)
+            push!(exprs, :(offset += sizeof($intyp)* *($(dims...))))
         end
     end
-    skip(in, pad_next(offset, T, strategy))
-    dst
+    push!(exprs, :(skip(inp, pad_next(offset, $T, strategy))))
+
+    if T.mutable
+        fn = quote
+            function unpack!(dst::$T, inp::IO, strategy::DataAlign, endianness::Symbol)
+                $(exprs...)
+                dst
+            end
+        end
+    else
+        fn = quote
+            function unpack(inp::IO, ::Type{$T}, strategy::DataAlign, endianness::Symbol)
+                $(exprs...)
+                $T($(tmpnames...))
+            end
+        end
+    end
+    fn
 end
-function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianness::Symbol)
-    unpack!(T(), in, T, asize, strategy, endianness)
+
+function unpack{T}(in::IO, ::Type{T}, strategy::DataAlign, endianness::Symbol)
+    unpack!(T(), in, strategy, endianness)
 end
 
 function unpack{T}(in::IO, ::Type{T}, endianness::Symbol)
-    chktype(T)
     reg = STRUCT_REGISTRY[T]
-    unpack(in, T, reg.asize, reg.strategy, endianness)
+    unpack(in, T, reg.strategy, endianness)
 end
 function unpack{T}(in::IO, ::Type{T})
-    chktype(T)
     reg = STRUCT_REGISTRY[T]
-    unpack(in, T, reg.asize, reg.strategy, reg.endianness)
+    unpack(in, T, reg.strategy, reg.endianness)
 end
 
 function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endianness::Symbol)
@@ -226,21 +305,21 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
         end
         data = if typ <: String
             typ = Uint8
-            convert(Array{Uint8}, getfield(struct, name))
+            convert(Array{Uint8}, struct.(name))
         else
-            getfield(struct, name)
+            struct.(name)
         end
 
         offset += write(out, zeros(Uint8, pad_next(offset, typ, strategy)))
-
         # process backreferences
         dims = get(asize, name, 1)
         for (idx, dim) in enumerate(dims)
             if isa(dim, Symbol)
-                dims[idx] = getfield(struct, dim)
+                dims[idx] = struct.(dim)
             end
         end
-        numel = prod(get(asize, name, 1))
+        numel = prod(dims)
+
         idx_end = numel > 1 ? min(numel, length(data)) : 1
         if !isempty(typ.names)
             if typeof(data) <: AbstractArray
