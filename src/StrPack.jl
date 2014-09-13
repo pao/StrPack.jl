@@ -34,7 +34,6 @@ end
 const STRUCT_REGISTRY = Dict{Type, Struct}()
 
 macro struct(xpr...)
-    (typname, typdef, asize, bsize) = extract_annotations(xpr[1])
     if length(xpr) > 3
         error("too many arguments supplied to @struct")
     end
@@ -57,6 +56,7 @@ macro struct(xpr...)
         alignment = :(align_default)
         endianness = :(:NativeEndian)
     end
+    (typname, typdef, asize, bsize) = extract_annotations(xpr[1], alignment, endianness)
     new_struct = :(Struct($asize, $bsize, $alignment, $endianness))
 
     quote
@@ -77,7 +77,7 @@ macro struct(xpr...)
 end
 
 # hmm...AST selectors could be useful
-function extract_annotations(exprIn)
+function extract_annotations(exprIn, alignment, endianness)
     asizes = Expr[]
     bsizes = Expr[]
     typname = nothing
@@ -110,10 +110,13 @@ function extract_annotations(exprIn)
         # generate the default constructor and a stream constructor
         push!(exprIn.args[3].args, :($typname($(fieldnames...)) = new($(fieldnames...))))
         if mutable
-            push!(exprIn.args[3].args, :($typname(ios::IO) = unpack!(new(), ios)
+            push!(exprIn.args[3].args, :($typname(ios::IO, strategy, endianness) = unpack!(new(), ios, strategy, endianness)))
         else
-            push!(exprIn.args[3].args, :($typname(ios::IO) = unpack(ios, $typname)))
+            push!(exprIn.args[3].args, :($typname(ios::IO, strategy, endianness) = unpack(ios, $typname, strategy, endianness)))
         end
+        push!(exprIn.args[3].args, :($typname(ios::IO) = begin
+            unpack(ios, $typname, $alignment, $endianness)
+        end))
     else
         error("only type definitions can be supplied to @struct")
     end
@@ -240,7 +243,7 @@ function gen_unpack(T, asize)
 end
 
 function unpack{T}(in::IO, ::Type{T}, strategy::DataAlign, endianness::Symbol)
-    unpack!(T(), in, strategy, endianness)
+    T(in, strategy, endianness)
 end
 
 function unpack!{T}(dst::T, in::IO)

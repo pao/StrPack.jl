@@ -59,7 +59,7 @@ function roundtrip2{T}(a::T)
     isequal(a, T(ios))
 end
 
-roundtrip(a) = roundtrip1(a)
+roundtrip(a) = roundtrip1(a) && roundtrip2(a)
 
 @test roundtrip(A(0xbc))
 
