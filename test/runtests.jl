@@ -45,12 +45,21 @@ end
     el::Array{Uint8,1}(sz)
 end
 
-function roundtrip(a)
+function roundtrip1{T}(a::T)
     ios = IOBuffer()
     pack(ios, a)
     seek(ios, 0)
-    isequal(a, unpack(ios, typeof(a)))
+    isequal(a, unpack(ios, T))
 end
+
+function roundtrip2{T}(a::T)
+    ios = IOBuffer()
+    pack(ios, a)
+    seek(ios, 0)
+    isequal(a, T(ios))
+end
+
+roundtrip(a) = roundtrip1(a)
 
 @test roundtrip(A(0xbc))
 

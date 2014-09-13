@@ -71,6 +71,7 @@ macro struct(xpr...)
             end
             true
         end
+        # I can get rid of this by testing mutability from the AST
         eval(StrPack, gen_unpack($(esc(typname)), $asize))
     end
 end
@@ -89,6 +90,7 @@ function extract_annotations(exprIn)
         else
             error("Unable to extract type name!")
         end
+        mutable = exprIn.args[1]
         for field_xpr in exprIn.args[3].args
             if isexpr(field_xpr, :(::))
                 # first get and unwrap array size
@@ -105,9 +107,13 @@ function extract_annotations(exprIn)
                 push!(fieldnames, field_xpr.args[1])
             end
         end
-        # generate the default constructor and an empty constructor
+        # generate the default constructor and a stream constructor
         push!(exprIn.args[3].args, :($typname($(fieldnames...)) = new($(fieldnames...))))
-        push!(exprIn.args[3].args, :($typname() = new()))
+        if mutable
+            push!(exprIn.args[3].args, :($typname(ios::IO) = unpack!(new(), ios)
+        else
+            push!(exprIn.args[3].args, :($typname(ios::IO) = unpack(ios, $typname)))
+        end
     else
         error("only type definitions can be supplied to @struct")
     end
@@ -153,55 +159,6 @@ function chktype{T}(::Type{T})
         error("Type $T is not bits-equivalent.")
     end
 end
-
-## function unpack!{T}(dst::T, inp::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianness::Symbol)
-##     chktype(T)
-##     tgtendianness = endianness_converters[endianness][2]
-##     offset = 0
-##     for (typ, name) in zip(T.types, T.names)
-##         dims = get(asize, name, 1)
-##         # process backreferences
-##         for (idx, dim) in enumerate(dims)
-##             if isa(dim, Symbol)
-##                 dims[idx] = dst.(name)
-##             end
-##         end
-##         intyp = if typ <: AbstractArray
-##             eltype(typ)
-##         else
-##             typ
-##         end
-
-##         # Skip padding before next field
-##         pad = pad_next(offset,intyp,strategy)
-##         skip(inp,pad)
-##         offset += pad
-##         offset += if intyp <: String
-##             dst.(name) = rstrip(convert(typ, read(inp, Uint8, dims...)), ['\0'])
-##             prod(dims)
-##         elseif !isempty(intyp.names)
-##             if typ <: AbstractArray
-##                 item = Array(intyp, dims...)
-##                 for i in 1:prod(dims)
-##                     item[i] = unpack(inp, intyp)
-##                 end
-##                 dst.(name) = item
-##             else
-##                 dst.(name) = unpack(inp, intyp)
-##             end
-##             calcsize(intyp)*prod(dims)
-##         else
-##             if typ <: AbstractArray
-##                 dst.(name) = map(tgtendianness, read(inp, intyp, dims...))
-##             else
-##                 dst.(name) = tgtendianness(read(inp, intyp))
-##             end
-##             sizeof(intyp)*prod(dims)
-##         end
-##     end
-##     skip(inp, pad_next(offset, T, strategy))
-##     dst
-## end
 
 function gen_unpack(T, asize)
     chktype(T)
@@ -284,6 +241,11 @@ end
 
 function unpack{T}(in::IO, ::Type{T}, strategy::DataAlign, endianness::Symbol)
     unpack!(T(), in, strategy, endianness)
+end
+
+function unpack!{T}(dst::T, in::IO)
+    reg = STRUCT_REGISTRY[T]
+    unpack!(dst, in, reg.strategy, reg.endianness)
 end
 
 function unpack{T}(in::IO, ::Type{T}, endianness::Symbol)
