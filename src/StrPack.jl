@@ -33,6 +33,12 @@ end
 
 const STRUCT_REGISTRY = Dict{Type, Struct}()
 
+const endianness_converters = {
+    :BigEndian => (hton, ntoh),
+    :LittleEndian => (htol, ltoh),
+    :NativeEndian => (identity, identity),
+    }
+
 macro struct(xpr...)
     if length(xpr) > 3
         error("too many arguments supplied to @struct")
@@ -71,7 +77,7 @@ macro struct(xpr...)
             end
             true
         end
-        # I can get rid of this by testing mutability from the AST
+        # We splice in an eval here so gen_unpack can see the new type
         eval(StrPack, gen_unpack($(esc(typname)), $asize))
     end
 end
@@ -124,12 +130,6 @@ function extract_annotations(exprIn, alignment, endianness)
     bsize = !isempty(bsizes) ? :(Dict([$(bsizes...)])) : :(Dict())
     (typname, exprIn, asize, bsize)
 end
-
-endianness_converters = {
-    :BigEndian => (hton, ntoh),
-    :LittleEndian => (htol, ltoh),
-    :NativeEndian => (identity, identity),
-    }
 
 # A byte of padding
 bitstype 8 PadByte
@@ -270,9 +270,9 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
         end
         data = if typ <: String
             typ = Uint8
-            convert(Array{Uint8}, struct.(name))
+            convert(Array{Uint8}, getfield(struct, name))
         else
-            struct.(name)
+            getfield(struct, name)
         end
 
         offset += write(out, zeros(Uint8, pad_next(offset, typ, strategy)))
@@ -280,7 +280,7 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
         dims = get(asize, name, 1)
         for (idx, dim) in enumerate(dims)
             if isa(dim, Symbol)
-                dims[idx] = struct.(dim)
+                dims[idx] = getfield(struct, dim)
             end
         end
         numel = prod(dims)
