@@ -1,13 +1,16 @@
 module StrPack
 
+macro lintpragma(s); end
+
 export @struct
-export pack, unpack!, unpack, sizeof
+export pack, unpack!, unpack
 export DataAlign
 export align_default, align_packed, align_packmax, align_structpack, align_table
 export align_x86_pc_linux_gnu, align_native
 export show_struct_layout
 
 using Base.Meta
+using Compat
 
 import Base.read, Base.write
 import Base.isequal
@@ -22,7 +25,7 @@ immutable DataAlign
     # aggregate::(Vector{Type} -> Integer); used for composite types not in ttable
     aggregate::Function
 end
-DataAlign(def::Function, agg::Function) = DataAlign((Type=>Integer)[], def, agg)
+DataAlign(def::Function, agg::Function) = DataAlign(Dict{Type, Int}(), def, agg)
 
 immutable Struct
     asize::Dict
@@ -33,11 +36,11 @@ end
 
 const STRUCT_REGISTRY = Dict{Type, Struct}()
 
-const endianness_converters = {
+const endianness_converters = Compat.@Dict(
     :BigEndian => (hton, ntoh),
     :LittleEndian => (htol, ltoh),
     :NativeEndian => (identity, identity),
-    }
+    )
 
 macro struct(xpr...)
     if length(xpr) > 3
@@ -200,14 +203,11 @@ function gen_unpack(T, asize)
             end)
         elseif !isempty(intyp.names)
             if typ <: AbstractArray
-                # we generate a unique symbol here to maintain type stability in the generated fn
-                @gensym tmp
                 push!(exprs, quote
-                    $tmp = Array($intyp, $(dims...))
-                    for i in 1:length($tmp)
-                        ($tmp)[i] = unpack(inp, $intyp)
+                    $dst = Array($intyp, $(dims...))
+                    for i in 1:length($dst)
+                        ($dst)[i] = unpack(inp, $intyp)
                     end
-                    $dst = $tmp
                 end)
             else
                 push!(exprs, :($dst = unpack(inp, $intyp)))
@@ -326,6 +326,16 @@ macro withIOBuffer(iostr, ex)
     end
 end
 
+function lint_helper(ex::Expr, ctx)
+    Lint.msg(ctx, 0, "using the helper")
+    if ex.head == :macrocall && ex.args[1] == symbol("@withIOBuffer")
+        ctx.callstack[end].localvars[end][ex.args[2]] = ctx.line
+        Lint.msg(ctx, 0, "checked a @withIOBuffer")
+    end
+    return false
+end
+
+@lintpragma("Ignore use of undeclared variable iostr")
 pack{T}(struct::T, a::Dict, s::DataAlign, n::Symbol) = @withIOBuffer iostr pack(iostr, a, s, n)
 pack{T}(struct::T) = @withIOBuffer iostr pack(iostr, struct)
 
@@ -372,11 +382,11 @@ end
 
 # Specific architectures
 align_x86_pc_linux_gnu = align_table(align_default,
-    [
+    Compat.@Dict(
     Int64 => 4,
     Uint64 => 4,
     Float64 => 4,
-    ])
+    ))
 
 # Get alignment for a given type
 function alignment_for(strategy::DataAlign, T::Type)
