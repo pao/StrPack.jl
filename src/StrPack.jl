@@ -430,7 +430,7 @@ function calcsize{T}(::Type{T}, asize::Dict, strategy::DataAlign)
 end
 calcsize{T}(::Type{T}) = calcsize(T, STRUCT_REGISTRY[T].asize, STRUCT_REGISTRY[T].strategy)
 
-function show_struct_layout{T}(::Type{T}, asize::Dict, strategy::DataAlign, width, bytesize)
+function show_struct_layout{T}(io::IO, ::Type{T}, asize::Dict, strategy::DataAlign, width, bytesize)
     chktype(T)
     offset = 0
     for (typ, name) in zip(T.types, T.names)
@@ -443,36 +443,52 @@ function show_struct_layout{T}(::Type{T}, asize::Dict, strategy::DataAlign, widt
             typ
         end
         padsize = pad_next(offset, intyp, strategy)
-        offset = show_layout_format(PadByte, sizeof(PadByte), padsize, width, bytesize, offset)
-        offset = show_layout_format(typ, sizeof(intyp), dims, width, bytesize, offset)
+        offset = show_layout_format(io, PadByte, "", sizeof(PadByte), padsize, width, bytesize, offset)
+        offset = show_layout_format(io, typ, name, sizeof(intyp), dims, width, bytesize, offset)
     end
     padsize = pad_next(offset, T, strategy)
-    offset = show_layout_format(PadByte, sizeof(PadByte), padsize, width, bytesize, offset)
+    offset = show_layout_format(io, PadByte, "", sizeof(PadByte), padsize, width, bytesize, offset)
     if offset % width != 0
-        println()
+        println(io)
     end
 end
-show_struct_layout{T}(::Type{T}) = show_struct_layout(T, STRUCT_REGISTRY[T].asize, STRUCT_REGISTRY[T].strategy, 8, 10)
-show_struct_layout{T}(::Type{T}, width::Integer, bytesize::Integer) = show_struct_layout(T, STRUCT_REGISTRY[T].asize, STRUCT_REGISTRY[T].strategy, width, bytesize)
-# show_struct_layout(T::Type, asize::Dict, strategy::DataAlign, width) = show_struct_layout(T, strategy, width, 10)
+show_struct_layout{T}(::Type{T}, asize::Dict, strategy::DataAlign, width, bytesize) = show_struct_layout(STDOUT, T, asize, strategy, width, bytesize)
+show_struct_layout{T}(io::IO, ::Type{T}) = show_struct_layout(io, T, STRUCT_REGISTRY[T].asize, STRUCT_REGISTRY[T].strategy, 8, 10)
+show_struct_layout{T}(::Type{T}) = show_struct_layout(STDOUT, T)
+show_struct_layout{T}(io::IO, ::Type{T}, width::Integer, bytesize::Integer) = show_struct_layout(io, T, STRUCT_REGISTRY[T].asize, STRUCT_REGISTRY[T].strategy, width, bytesize)
+show_struct_layout{T}(::Type{T}, width::Integer, bytesize::Integer) = show_struct_layout(STDOUT, T, width, bytesize)
 
-function show_layout_format(typ, typsize, dims, width, bytesize, offset)
+function spliton(str, width)
+    out_str = ""
+    for c in str
+        new_str = string(out_str, c)
+        if strwidth(new_str) > width
+            break
+        end
+        out_str = new_str
+    end
+    (out_str, str[sizeof(out_str)+1:end])
+end
+
+function show_layout_format(io, typ, name, typsize, dims, width, bytesize, offset)
     for i in 1:prod(dims)
-        tstr = string(typ)[1:min(typsize*bytesize-2, end)]
-        str = "[" * tstr * "-"^(bytesize*typsize-2-length(tstr)) * "]"
+        maxcols = typsize*bytesize-2
+        tstr = string(name, "::", typ)
+        (tstr, _) = spliton(tstr, maxcols)
+        raw_str = "[" * tstr * "-"^(maxcols-strwidth(tstr)) * "]"
         typsize_i = typsize
-        while !isempty(str)
+        while !isempty(raw_str)
             if offset % width == 0
-                @printf("0x%04X ", offset)
+                @printf(io, "0x%04X ", offset)
             end
             len_prn = min(width - (offset % width), typsize_i)
             nprint = bytesize*len_prn
-            print(str[1:nprint])
-            str = str[nprint+1:end]
+            (str, raw_str) = spliton(raw_str, nprint)
+            print(io, str)
             typsize_i -= len_prn
             offset += len_prn
             if offset % width == 0
-                println()
+                println(io)
             end
         end
     end
@@ -487,7 +503,7 @@ align_native = align_table(align_default, let
           (Ptr{Uint}, Ptr{Uint}, Ptr{Uint}, Ptr{Uint}, Ptr{Uint}, Ptr{Uint}),
           i8a, i16a, i32a, i64a, f32a, f64a)
 
-    [
+    Compat.@Dict(
      Int8 => i8a[1],
      Uint8 => i8a[1],
      Int16 => i16a[1],
@@ -498,7 +514,7 @@ align_native = align_table(align_default, let
      Uint64 => i64a[1],
      Float32 => f32a[1],
      Float64 => f64a[1],
-     ]
+     )
 end)
 
 end

@@ -87,3 +87,15 @@ roundtrip(a) = roundtrip1(a) && roundtrip2(a)
 
 @test roundtrip(Backref(4, [0x01; 0x03; 0x05; 0x07]))
 @test !roundtrip(Backref(6, [0x01; 0x03; 0x05; 0x07; 0x09]))
+
+buf = IOBuffer()
+
+show_struct_layout(buf, Hvl_t)
+
+@struct type WithUnicode
+    α::Int32
+    Российская_самолетостроительная_корпорация::Int8 # overflow box
+    ℵ0::Array{Int64,1}(5) # may not be large enough to hold value
+end
+
+show_struct_layout(buf, WithUnicode)
