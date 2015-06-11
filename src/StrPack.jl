@@ -8,6 +8,7 @@ export align_x86_pc_linux_gnu, align_native
 export show_struct_layout
 
 using Base.Meta
+using Compat
 
 import Base.read, Base.write
 import Base.isequal
@@ -22,7 +23,7 @@ immutable DataAlign
     # aggregate::(Vector{Type} -> Integer); used for composite types not in ttable
     aggregate::Function
 end
-DataAlign(def::Function, agg::Function) = DataAlign((Type=>Integer)[], def, agg)
+DataAlign(def::Function, agg::Function) = DataAlign((@compat Dict{Type,Integer}()), def, agg)
 
 immutable Struct
     asize::Dict
@@ -62,7 +63,7 @@ macro struct(xpr...)
         STRUCT_REGISTRY[$(esc(typname))] = $new_struct
         const fisequal = isequal
         fisequal(a::$(esc(typname)), b::$(esc(typname))) = begin
-            for name in $(esc(typname)).names
+            for name in fieldnames($(esc(typname)))
                 if !isequal(getfield(a, name), getfield(b, name))
                     return false
                 end
@@ -99,15 +100,15 @@ function extract_annotations(exprIn)
     else
         error("only type definitions can be supplied to @struct")
     end
-    asize = :(Dict([$(fieldnames...)], Array{Integer,1}[$(asizes...)]))
+    asize = :(Dict(zip([$(fieldnames...)], Array{Integer,1}[$(asizes...)])))
     (typname, exprIn, asize)
 end
 
-endianness_converters = {
+endianness_converters = @compat Dict(
     :BigEndian => (hton, ntoh),
     :LittleEndian => (htol, ltoh),
     :NativeEndian => (identity, identity),
-    }
+    :SwappedEndian => (Base.bswap, Base.bswap))
 
 # A byte of padding
 bitstype 8 PadByte
@@ -117,7 +118,7 @@ read(s::IO, ::Type{PadByte}) = read(s, Uint8)
 function isbitsequivalent{T}(::Type{T})
     if isbits(T) || T <: String && !T.abstract
         return true
-    elseif isempty(T.names)
+    elseif isempty(fieldnames(T))
         return false
     end
     # TODO AbstractArray inspect element instead
@@ -133,7 +134,7 @@ function isbitsequivalent{T}(::Type{T})
 end
 
 function chktype{T}(::Type{T})
-    if isempty(T.names)
+    if isempty(fieldnames(T))
         error("Type $T is not an aggregate type.")
     end
     if !isbitsequivalent(T)
@@ -146,7 +147,7 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
     tgtendianness = endianness_converters[endianness][2]
     offset = 0
     rvar = Any[]
-    for (typ, name) in zip(T.types, T.names)
+    for (typ, name) in zip(T.types, fieldnames(T))
         dims = get(asize, name, 1)
         intyp = if typ <: AbstractArray
             eltype(typ)
@@ -161,7 +162,7 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
         offset += if intyp <: String
             push!(rvar, rstrip(convert(typ, read(in, Uint8, dims...)), ['\0']))
             prod(dims)
-        elseif !isempty(intyp.names)
+        elseif !isempty(fieldnames(intyp))
             if typ <: AbstractArray
                 item = Array(intyp, dims...)
                 for i in 1:prod(dims)
@@ -199,7 +200,7 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
     chktype(T)
     tgtendianness = endianness_converters[endianness][1]
     offset = 0
-    for (typ, name) in zip(T.types, T.names)
+    for (typ, name) in zip(T.types, fieldnames(T))
         if typ <: AbstractArray
             typ = eltype(typ)
         end
@@ -214,7 +215,7 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
 
         numel = prod(get(asize, name, 1))
         idx_end = numel > 1 ? min(numel, length(data)) : 1
-        if !isempty(typ.names)
+        if !isempty(fieldnames(typ))
             if typeof(data) <: AbstractArray
                 for i in 1:idx_end
                     offset += pack(out, data[i])
@@ -300,17 +301,17 @@ end
 
 # Specific architectures
 align_x86_pc_linux_gnu = align_table(align_default,
-    [
+    @compat Dict(
     Int64 => 4,
     Uint64 => 4,
     Float64 => 4,
-    ])
+    ))
 
 # Get alignment for a given type
 function alignment_for(strategy::DataAlign, T::Type)
     if haskey(strategy.ttable, T)
         strategy.ttable[T]
-    elseif !isempty(T.names)
+    elseif !isempty(fieldnames(T))
         strategy.aggregate(T.types)
     else
         strategy.default(T)
@@ -325,7 +326,7 @@ end
 function calcsize{T}(::Type{T}, asize::Dict, strategy::DataAlign)
     chktype(T)
     size = 0
-    for (typ, name) in zip(T.types, T.names)
+    for (typ, name) in zip(T.types, fieldnames(T))
         dims = get(asize, name, 1)
         typ = if typ <: Array
             eltype(typ)
@@ -337,7 +338,7 @@ function calcsize{T}(::Type{T}, asize::Dict, strategy::DataAlign)
         size += pad_next(size, typ, strategy)
         size += if isbits(typ)
             prod(dims)*sizeof(typ)
-        elseif !isempty(typ.names)
+        elseif !isempty(fieldnames(typ))
             prod(dims)*sizeof(Struct(typ))
         else
             error("Improper type $typ in struct.")
@@ -351,7 +352,7 @@ calcsize{T}(::Type{T}) = calcsize(T, STRUCT_REGISTRY[T].asize, STRUCT_REGISTRY[T
 function show_struct_layout{T}(::Type{T}, asize::Dict, strategy::DataAlign, width, bytesize)
     chktype(T)
     offset = 0
-    for (typ, name) in zip(T.types, T.names)
+    for (typ, name) in zip(T.types, fieldnames(T))
         dims = get(asize, name, 1)
         intyp = if typ <: Array
             eltype(typ)
@@ -405,7 +406,7 @@ align_native = align_table(align_default, let
           (Ptr{Uint}, Ptr{Uint}, Ptr{Uint}, Ptr{Uint}, Ptr{Uint}, Ptr{Uint}),
           i8a, i16a, i32a, i64a, f32a, f64a)
 
-    [
+    @compat Dict(
      Int8 => i8a[1],
      Uint8 => i8a[1],
      Int16 => i16a[1],
@@ -416,7 +417,7 @@ align_native = align_table(align_default, let
      Uint64 => i64a[1],
      Float32 => f32a[1],
      Float64 => f64a[1],
-     ]
+    )
 end)
 
 end
