@@ -1,6 +1,7 @@
+VERSION >= v"0.4.0-dev+6641" && __precompile__()
 module StrPack
 
-export @struct
+export @struct, @__struct_init__
 export pack, unpack, sizeof
 export DataAlign
 export align_default, align_packed, align_packmax, align_structpack, align_table
@@ -60,7 +61,8 @@ macro struct(xpr...)
     new_struct = :(Struct($asize, $alignment, $endianness))
     quote
         $(esc(typ))
-        STRUCT_REGISTRY[$(esc(typname))] = $new_struct
+        $(esc(:(isdefined(:STRUCT_REGISTRY) || const STRUCT_REGISTRY = Dict{Type, StrPack.Struct}())))
+        $(esc(:(STRUCT_REGISTRY[$typname]))) = $new_struct
         const fisequal = isequal
         fisequal(a::$(esc(typname)), b::$(esc(typname))) = begin
             for name in fieldnames($(esc(typname)))
@@ -71,6 +73,12 @@ macro struct(xpr...)
             true
         end
     end
+end
+
+macro __struct_init__()
+    esc(quote
+        merge!(StrPack.STRUCT_REGISTRY,STRUCT_REGISTRY)
+    end)
 end
 
 headof(xpr, sym) = false
@@ -156,7 +164,7 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
         end
 
         # Skip padding before next field
-        pad = pad_next(offset,intyp,strategy) 
+        pad = pad_next(offset,intyp,strategy)
         skip(in,pad)
         offset += pad
         offset += if intyp <: String
