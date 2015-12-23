@@ -1,7 +1,7 @@
 VERSION >= v"0.4.0-dev+6641" && __precompile__()
 module StrPack
 
-export @struct, @__struct_init__
+export @struct
 export pack, unpack, sizeof
 export DataAlign
 export align_default, align_packed, align_packmax, align_structpack, align_table
@@ -31,8 +31,6 @@ immutable Struct
     strategy::DataAlign
     endianness::Symbol
 end
-
-const STRUCT_REGISTRY = Dict{Type, Struct}()
 
 macro struct(xpr...)
     (typname, typ, asize) = extract_annotations(xpr[1])
@@ -73,12 +71,6 @@ macro struct(xpr...)
             true
         end
     end
-end
-
-macro __struct_init__()
-    esc(quote
-        merge!(StrPack.STRUCT_REGISTRY,STRUCT_REGISTRY)
-    end)
 end
 
 headof(xpr, sym) = false
@@ -195,12 +187,12 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
 end
 function unpack{T}(in::IO, ::Type{T}, endianness::Symbol)
     chktype(T)
-    reg = STRUCT_REGISTRY[T]
+    reg = T.name.module.STRUCT_REGISTRY[T]
     unpack(in, T, reg.asize, reg.strategy, endianness)
 end
 function unpack{T}(in::IO, ::Type{T})
     chktype(T)
-    reg = STRUCT_REGISTRY[T]
+    reg = T.name.module.STRUCT_REGISTRY[T]
     unpack(in, T, reg.asize, reg.strategy, reg.endianness)
 end
 
@@ -241,16 +233,16 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
             offset += write(out, zeros(typ, max(numel-idx_end, 0)))
         end
     end
-    offset += write(out, zeros(Uint8, pad_next(offset, T, strategy)))
+    offset += write(out, zeros(UInt8, pad_next(offset, T, strategy)))
 end
 function pack{T}(out::IO, struct::T, endianness::Symbol)
     chktype(T)
-    reg = STRUCT_REGISTRY[T]
+    reg = T.name.module.STRUCT_REGISTRY[T]
     pack(out, struct, reg.asize, reg.strategy, endianness)
 end
 function pack{T}(out::IO, struct::T)
     chktype(T)
-    reg = STRUCT_REGISTRY[T]
+    reg = T.name.module.STRUCT_REGISTRY[T]
     pack(out, struct, reg.asize, reg.strategy, reg.endianness)
 end
 
@@ -355,7 +347,7 @@ function calcsize{T}(::Type{T}, asize::Dict, strategy::DataAlign)
     size += pad_next(size, T, strategy)
     size
 end
-calcsize{T}(::Type{T}) = calcsize(T, STRUCT_REGISTRY[T].asize, STRUCT_REGISTRY[T].strategy)
+calcsize{T}(::Type{T}) = calcsize(T, T.name.module.STRUCT_REGISTRY[T].asize, T.name.module.STRUCT_REGISTRY[T].strategy)
 
 function show_struct_layout{T}(::Type{T}, asize::Dict, strategy::DataAlign, width, bytesize)
     chktype(T)
@@ -379,8 +371,8 @@ function show_struct_layout{T}(::Type{T}, asize::Dict, strategy::DataAlign, widt
         println()
     end
 end
-show_struct_layout{T}(::Type{T}) = show_struct_layout(T, STRUCT_REGISTRY[T].asize, STRUCT_REGISTRY[T].strategy, 8, 10)
-show_struct_layout{T}(::Type{T}, width::Integer, bytesize::Integer) = show_struct_layout(T, STRUCT_REGISTRY[T].asize, STRUCT_REGISTRY[T].strategy, width, bytesize)
+show_struct_layout{T}(::Type{T}) = show_struct_layout(T, T.name.module.STRUCT_REGISTRY[T].asize, T.name.module.STRUCT_REGISTRY[T].strategy, 8, 10)
+show_struct_layout{T}(::Type{T}, width::Integer, bytesize::Integer) = show_struct_layout(T, T.name.module.STRUCT_REGISTRY[T].asize, T.name.module.STRUCT_REGISTRY[T].strategy, width, bytesize)
 # show_struct_layout(T::Type, asize::Dict, strategy::DataAlign, width) = show_struct_layout(T, strategy, width, 10)
 
 function show_layout_format(typ, typsize, dims, width, bytesize, offset)
