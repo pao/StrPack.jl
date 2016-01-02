@@ -113,10 +113,10 @@ endianness_converters = @compat Dict(
 # A byte of padding
 bitstype 8 PadByte
 write(s::IO, x::PadByte) = write(s, 0x00)
-read(s::IO, ::Type{PadByte}) = read(s, Uint8)
+read(s::IO, ::Type{PadByte}) = read(s, UInt8)
 
 function isbitsequivalent{T}(::Type{T})
-    if isbits(T) || T <: String && !T.abstract
+    if isbits(T) || T <: AbstractString && !T.abstract
         return true
     elseif isempty(fieldnames(T))
         return false
@@ -159,8 +159,8 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
         pad = pad_next(offset,intyp,strategy)
         skip(in,pad)
         offset += pad
-        offset += if intyp <: String
-            push!(rvar, rstrip(convert(typ, read(in, Uint8, dims...)), ['\0']))
+        offset += if intyp <: AbstractString
+            push!(rvar, rstrip(convert(typ, read(in, UInt8, dims...)), ['\0']))
             prod(dims)
         elseif !isempty(fieldnames(intyp))
             if typ <: AbstractArray
@@ -204,14 +204,14 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
         if typ <: AbstractArray
             typ = eltype(typ)
         end
-        data = if typ <: String
-            typ = Uint8
-            convert(Array{Uint8}, getfield(struct, name))
+        data = if typ <: AbstractString
+            typ = UInt8
+            convert(Array{UInt8}, getfield(struct, name))
         else
             getfield(struct, name)
         end
 
-        offset += write(out, zeros(Uint8, pad_next(offset, typ, strategy)))
+        offset += write(out, zeros(UInt8, pad_next(offset, typ, strategy)))
 
         numel = prod(get(asize, name, 1))
         idx_end = numel > 1 ? min(numel, length(data)) : 1
@@ -220,7 +220,7 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
                 for i in 1:idx_end
                     offset += pack(out, data[i])
                 end
-                offset += write(out, zeros(Uint8, calcsize(typ)*(numel-idx_end)))
+                offset += write(out, zeros(UInt8, calcsize(typ)*(numel-idx_end)))
             else
                 offset += pack(out, data)
             end
@@ -258,13 +258,13 @@ end
 pack{T}(struct::T, a::Dict, s::DataAlign, n::Symbol) = @withIOBuffer iostr pack(iostr, a, s, n)
 pack{T}(struct::T) = @withIOBuffer iostr pack(iostr, struct)
 
-unpack{T}(str::Union(String, Array{Uint8,1}), ::Type{T}) = unpack(IOBuffer(str), T)
+unpack{T}(str::Union{AbstractString, Array{UInt8,1}}, ::Type{T}) = unpack(IOBuffer(str), T)
 
 ## Alignment strategies and utility functions ##
 
 # default alignment for bitstype T is nextpow2(sizeof(::Type{T}))
 type_alignment_default{T<:AbstractArray}(::Type{T}) = type_alignment_default(eltype(T))
-type_alignment_default{T<:String}(::Type{T}) = 1
+type_alignment_default{T<:AbstractString}(::Type{T}) = 1
 type_alignment_default{T}(::Type{T}) = nextpow2(sizeof(T))
 
 # default strategy
@@ -303,7 +303,7 @@ end
 align_x86_pc_linux_gnu = align_table(align_default,
     @compat Dict(
     Int64 => 4,
-    Uint64 => 4,
+    UInt64 => 4,
     Float64 => 4,
     ))
 
@@ -330,8 +330,8 @@ function calcsize{T}(::Type{T}, asize::Dict, strategy::DataAlign)
         dims = get(asize, name, 1)
         typ = if typ <: Array
             eltype(typ)
-        elseif typ <: String
-            Uint8
+        elseif typ <: AbstractString
+            UInt8
         else
             typ
         end
@@ -356,8 +356,8 @@ function show_struct_layout{T}(::Type{T}, asize::Dict, strategy::DataAlign, widt
         dims = get(asize, name, 1)
         intyp = if typ <: Array
             eltype(typ)
-        elseif typ <: String
-            Uint8
+        elseif typ <: AbstractString
+            UInt8
         else
             typ
         end
@@ -400,21 +400,21 @@ end
 
 ## Native layout ##
 align_native = align_table(align_default, let
-    i8a, i16a, i32a, i64a, f32a, f64a = Array(Uint, 1), Array(Uint, 1), Array(Uint, 1), Array(Uint, 1), Array(Uint, 1), Array(Uint, 1)
+    i8a, i16a, i32a, i64a, f32a, f64a = Array(UInt, 1), Array(UInt, 1), Array(UInt, 1), Array(UInt, 1), Array(UInt, 1), Array(UInt, 1)
 
     ccall("jl_native_alignment", Void,
-          (Ptr{Uint}, Ptr{Uint}, Ptr{Uint}, Ptr{Uint}, Ptr{Uint}, Ptr{Uint}),
+          (Ptr{UInt}, Ptr{UInt}, Ptr{UInt}, Ptr{UInt}, Ptr{UInt}, Ptr{UInt}),
           i8a, i16a, i32a, i64a, f32a, f64a)
 
     @compat Dict(
      Int8 => i8a[1],
-     Uint8 => i8a[1],
+     UInt8 => i8a[1],
      Int16 => i16a[1],
-     Uint16 => i16a[1],
+     UInt16 => i16a[1],
      Int32 => i32a[1],
-     Uint32 => i32a[1],
+     UInt32 => i32a[1],
      Int64 => i64a[1],
-     Uint64 => i64a[1],
+     UInt64 => i64a[1],
      Float32 => f32a[1],
      Float64 => f64a[1],
     )
