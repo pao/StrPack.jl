@@ -2,11 +2,11 @@ using Base.Test
 using StrPack
 
 @struct type A
-    a::Uint8
+    a::UInt8
 end
 
 @struct type B
-    a::Array{Uint8,2}(2,2)
+    a::Array{UInt8,2}(2,2)
 end
 
 @struct type C
@@ -28,11 +28,11 @@ end
 abstract abstractG
 
 @struct type G1 <: abstractG
-a::Uint8
+  a::UInt8
 end
 
 @struct immutable G2 <: abstractG
-a::Uint8
+  a::UInt8
 end
 
 @struct type Hvl_t
@@ -49,7 +49,7 @@ end
 
 @test roundtrip(A(0xbc))
 
-@test !roundtrip(B(zeros(Uint8, 0, 0)))
+@test !roundtrip(B(zeros(UInt8, 0, 0)))
 @test !roundtrip(B([0xab 0xcd]))
 @test roundtrip(B([0x01 0x02; 0x03 0x04]))
 @test !roundtrip(B([0x01 0x02 0xab; 0x03 0x04 0xcd; 0xac 0xbd 0xef]))
@@ -66,7 +66,7 @@ end
 
 @test roundtrip(F([1. 2.; 3. 4.; 5. 6.]))
 
-@test roundtrip(G1(uint8(0)))
-@test roundtrip(G2(uint8(0)))
+@test roundtrip(G1(UInt8(0)))
+@test roundtrip(G2(UInt8(0)))
 
-@test roundtrip(Hvl_t(uint64(0), ccall(:jl_environ, Ptr{Void}, (Int,), 0)))
+@test roundtrip(Hvl_t(UInt64(0), ccall(:jl_environ, Ptr{Void}, (Int,), 0)))
