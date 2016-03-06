@@ -59,7 +59,7 @@ macro struct(xpr...)
     new_struct = :(Struct($asize, $alignment, $endianness))
     quote
         $(esc(typ))
-        $(esc(:(isdefined(:STRUCT_REGISTRY) || const STRUCT_REGISTRY = Dict{Type, StrPack.Struct}())))
+        $(esc(:(isdefined(:STRUCT_REGISTRY) || const STRUCT_REGISTRY = ObjectIdDict())))
         $(esc(:(STRUCT_REGISTRY[$typname]))) = $new_struct
         const fisequal = isequal
         fisequal(a::$(esc(typname)), b::$(esc(typname))) = begin
@@ -187,12 +187,12 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
 end
 function unpack{T}(in::IO, ::Type{T}, endianness::Symbol)
     chktype(T)
-    reg = T.name.module.STRUCT_REGISTRY[T]
+    reg = T.name.module.STRUCT_REGISTRY[T]::Struct
     unpack(in, T, reg.asize, reg.strategy, endianness)
 end
 function unpack{T}(in::IO, ::Type{T})
     chktype(T)
-    reg = T.name.module.STRUCT_REGISTRY[T]
+    reg = T.name.module.STRUCT_REGISTRY[T]::Struct
     unpack(in, T, reg.asize, reg.strategy, reg.endianness)
 end
 
