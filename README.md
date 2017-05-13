@@ -10,3 +10,9 @@ StrPack is a serializer/deserializer only in a very limited sense. StrPack only 
 Documentation
 =============
 More complete documentation can be found on [Read The Docs](https://strpackjl.readthedocs.org/en/latest/).
+
+WARNING
+=======
+
+This package is only semi maintained. While it has been updated to work correctly on Julia 0.5,
+there are no guarantees of correctness beyond the existing package tests. Use at your own risk.
