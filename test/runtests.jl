@@ -10,7 +10,7 @@ end
 end
 
 @struct type C
-    a::ASCIIString(5)
+    a::String(5)
 end
 
 @struct type D

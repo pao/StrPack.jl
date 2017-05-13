@@ -1,4 +1,3 @@
-VERSION >= v"0.4.0-dev+6641" && __precompile__()
 module StrPack
 
 export @struct
@@ -235,6 +234,10 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
     end
     offset += write(out, zeros(UInt8, pad_next(offset, T, strategy)))
 end
+
+zeros(x, n) = Base.zeros(x, n)
+zeros{T}(x::Type{Ptr{T}}, n) = [x(C_NULL) for i in 1:n]
+
 function pack{T}(out::IO, struct::T, endianness::Symbol)
     chktype(T)
     reg = T.name.module.STRUCT_REGISTRY[T]
