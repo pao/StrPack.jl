@@ -14,5 +14,5 @@ More complete documentation can be found on [Read The Docs](https://strpackjl.re
 WARNING
 =======
 
-This package is only semi maintained. While it has been updated to work correctly on Julia 0.5,
+This package is only semi-maintained. While it has been updated to work without warnings on Julia 0.5,
 there are no guarantees of correctness beyond the existing package tests. Use at your own risk.
