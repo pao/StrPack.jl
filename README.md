@@ -11,6 +11,13 @@ Documentation
 =============
 More complete documentation can be found on [Read The Docs](https://strpackjl.readthedocs.org/en/latest/).
 
+Incompatible change in 0.6
+==========================
+
+Note that the primary artifact of this package was the `@struct` macro. In Julia `v0.6`, `struct` is now a reserved word.
+This necessitates a change, hence the macro is now called `@str`. This change has been made since `v0.2.0` of this package.
+This means that any code that uses this package must be changed when running on Julia v0.6. 
+
 WARNING
 =======
 

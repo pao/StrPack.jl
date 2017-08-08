@@ -1,6 +1,7 @@
 module StrPack
 
-export @struct
+Base.warn_once("Using v0.2.0 of StrPack, which is incompatible with previous versions")
+export @str
 export pack, unpack, sizeof
 export DataAlign
 export align_default, align_packed, align_packmax, align_structpack, align_table
@@ -8,7 +9,6 @@ export align_x86_pc_linux_gnu, align_native
 export show_struct_layout
 
 using Base.Meta
-using Compat
 
 import Base.read, Base.write
 import Base.isequal
@@ -23,18 +23,18 @@ immutable DataAlign
     # aggregate::(Vector{Type} -> Integer); used for composite types not in ttable
     aggregate::Function
 end
-DataAlign(def::Function, agg::Function) = DataAlign((@compat Dict{Type,Integer}()), def, agg)
+DataAlign(def::Function, agg::Function) = DataAlign((Dict{Type,Integer}()), def, agg)
 
-immutable Struct
+immutable Str
     asize::Dict
     strategy::DataAlign
     endianness::Symbol
 end
 
-macro struct(xpr...)
+macro str(xpr...)
     (typname, typ, asize) = extract_annotations(xpr[1])
     if length(xpr) > 3
-        error("too many arguments supplied to @struct")
+        error("too many arguments supplied to @str")
     end
     if length(xpr) > 2
         if isexpr(xpr[3], :quote) && haskey(endianness_converters, eval(xpr[3]))
@@ -55,7 +55,7 @@ macro struct(xpr...)
         alignment = :(align_default)
         endianness = :(:NativeEndian)
     end
-    new_struct = :(Struct($asize, $alignment, $endianness))
+    new_struct = :(Str($asize, $alignment, $endianness))
     quote
         $(esc(typ))
         $(esc(:(isdefined(:STRUCT_REGISTRY) || const STRUCT_REGISTRY = ObjectIdDict())))
@@ -97,20 +97,20 @@ function extract_annotations(exprIn)
             end
         end
     else
-        error("only type definitions can be supplied to @struct")
+        error("only type definitions can be supplied to @str")
     end
     asize = :(Dict(zip([$(fieldnames...)], Array{Integer,1}[$(asizes...)])))
     (typname, exprIn, asize)
 end
 
-endianness_converters = @compat Dict(
+endianness_converters =  Dict(
     :BigEndian => (hton, ntoh),
     :LittleEndian => (htol, ltoh),
     :NativeEndian => (identity, identity),
     :SwappedEndian => (Base.bswap, Base.bswap))
 
 # A byte of padding
-bitstype 8 PadByte
+primitive type PadByte 8 end
 write(s::IO, x::PadByte) = write(s, 0x00)
 read(s::IO, ::Type{PadByte}) = read(s, UInt8)
 
@@ -163,7 +163,7 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
             prod(dims)
         elseif !isempty(fieldnames(intyp))
             if typ <: AbstractArray
-                item = Array(intyp, dims...)
+                item = Array{intyp}(dims...)
                 for i in 1:prod(dims)
                     item[i] = unpack(in, intyp)
                 end
@@ -186,16 +186,16 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
 end
 function unpack{T}(in::IO, ::Type{T}, endianness::Symbol)
     chktype(T)
-    reg = T.name.module.STRUCT_REGISTRY[T]::Struct
+    reg = T.name.module.STRUCT_REGISTRY[T]::Str
     unpack(in, T, reg.asize, reg.strategy, endianness)
 end
 function unpack{T}(in::IO, ::Type{T})
     chktype(T)
-    reg = T.name.module.STRUCT_REGISTRY[T]::Struct
+    reg = T.name.module.STRUCT_REGISTRY[T]::Str
     unpack(in, T, reg.asize, reg.strategy, reg.endianness)
 end
 
-function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endianness::Symbol)
+function pack{T}(out::IO, str::T, asize::Dict, strategy::DataAlign, endianness::Symbol)
     chktype(T)
     tgtendianness = endianness_converters[endianness][1]
     offset = 0
@@ -205,9 +205,9 @@ function pack{T}(out::IO, struct::T, asize::Dict, strategy::DataAlign, endiannes
         end
         data = if typ <: AbstractString
             typ = UInt8
-            convert(Array{UInt8}, getfield(struct, name))
+            convert(Array{UInt8}, getfield(str, name))
         else
-            getfield(struct, name)
+            getfield(str, name)
         end
 
         offset += write(out, zeros(UInt8, pad_next(offset, typ, strategy)))
@@ -238,15 +238,15 @@ end
 zeros(x, n) = Base.zeros(x, n)
 zeros{T}(x::Type{Ptr{T}}, n) = [x(C_NULL) for i in 1:n]
 
-function pack{T}(out::IO, struct::T, endianness::Symbol)
+function pack{T}(out::IO, str::T, endianness::Symbol)
     chktype(T)
     reg = T.name.module.STRUCT_REGISTRY[T]
-    pack(out, struct, reg.asize, reg.strategy, endianness)
+    pack(out, str, reg.asize, reg.strategy, endianness)
 end
-function pack{T}(out::IO, struct::T)
+function pack{T}(out::IO, str::T)
     chktype(T)
     reg = T.name.module.STRUCT_REGISTRY[T]
-    pack(out, struct, reg.asize, reg.strategy, reg.endianness)
+    pack(out, str, reg.asize, reg.strategy, reg.endianness)
 end
 
 # Convenience methods when you just want to use strings
@@ -258,8 +258,8 @@ macro withIOBuffer(iostr, ex)
     end
 end
 
-pack{T}(struct::T, a::Dict, s::DataAlign, n::Symbol) = @withIOBuffer iostr pack(iostr, a, s, n)
-pack{T}(struct::T) = @withIOBuffer iostr pack(iostr, struct)
+pack{T}(str::T, a::Dict, s::DataAlign, n::Symbol) = @withIOBuffer iostr pack(iostr, a, s, n)
+pack{T}(str::T) = @withIOBuffer iostr pack(iostr, str)
 
 unpack{T}(str::Union{AbstractString, Array{UInt8,1}}, ::Type{T}) = unpack(IOBuffer(str), T)
 
@@ -274,12 +274,12 @@ type_alignment_default{T}(::Type{T}) = nextpow2(sizeof(T))
 align_default = DataAlign(type_alignment_default, x -> maximum(map(type_alignment_default, x)))
 
 # equivalent to __attribute__ (( __packed__ ))
-align_packed = DataAlign(_ -> 1, _ -> 1)
+align_packed = DataAlign(x -> 1, x -> 1)
 
 # equivalent to #pragma pack(n)
 align_packmax(da::DataAlign, n::Integer) = DataAlign(
     da.ttable,
-    _ -> min(type_alignment_default(_), n),
+    x -> min(type_alignment_default(x), n),
     da.aggregate,
     )
 
@@ -287,7 +287,7 @@ align_packmax(da::DataAlign, n::Integer) = DataAlign(
 align_structpack(da::DataAlign, n::Integer) = DataAlign(
     da.ttable,
     da.default,
-    _ -> n,
+    x -> n,
     )
 
 # provide an alignment table
@@ -304,7 +304,7 @@ end
 
 # Specific architectures
 align_x86_pc_linux_gnu = align_table(align_default,
-    @compat Dict(
+    Dict(
     Int64 => 4,
     UInt64 => 4,
     Float64 => 4,
@@ -342,9 +342,9 @@ function calcsize{T}(::Type{T}, asize::Dict, strategy::DataAlign)
         size += if isbits(typ)
             prod(dims)*sizeof(typ)
         elseif !isempty(fieldnames(typ))
-            prod(dims)*sizeof(Struct(typ))
+            prod(dims)*sizeof(Str(typ))
         else
-            error("Improper type $typ in struct.")
+            error("Improper type $typ in str.")
         end
     end
     size += pad_next(size, T, strategy)
@@ -403,13 +403,13 @@ end
 
 ## Native layout ##
 align_native = align_table(align_default, let
-    i8a, i16a, i32a, i64a, f32a, f64a = Array(UInt, 1), Array(UInt, 1), Array(UInt, 1), Array(UInt, 1), Array(UInt, 1), Array(UInt, 1)
+    i8a, i16a, i32a, i64a, f32a, f64a = Array{UInt}(1), Array{UInt}(1), Array{UInt}(1), Array{UInt}(1), Array{UInt}(1), Array{UInt}(1)
 
     ccall("jl_native_alignment", Void,
           (Ptr{UInt}, Ptr{UInt}, Ptr{UInt}, Ptr{UInt}, Ptr{UInt}, Ptr{UInt}),
           i8a, i16a, i32a, i64a, f32a, f64a)
 
-    @compat Dict(
+     Dict(
      Int8 => i8a[1],
      UInt8 => i8a[1],
      Int16 => i16a[1],
