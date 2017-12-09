@@ -1,41 +1,41 @@
 using Base.Test
 using StrPack
 
-@str type A
+@struct type A
     a::UInt8
 end
 
-@str type B
+@struct type B
     a::Array{UInt8,2}(2,2)
 end
 
-@str type C
+@struct type C
     a::String(5)
 end
 
-@str type D
+@struct type D
     a::C
 end
 
-@str type E
+@struct type E
     a::Array{C,1}(2)
 end
 
-@str immutable F
+@struct immutable F
     a::Array{Float64,2}(3,2)
 end
 
 abstract type abstractG; end
 
-@str type G1 <: abstractG
+@struct type G1 <: abstractG
   a::UInt8
 end
 
-@str immutable G2 <: abstractG
+@struct immutable G2 <: abstractG
   a::UInt8
 end
 
-@str type Hvl_t
+@struct type Hvl_t
     len::Csize_t
     p::Ptr{Void}
 end

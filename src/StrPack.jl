@@ -1,7 +1,6 @@
 module StrPack
 
-Base.warn_once("Using v0.2.0 of StrPack, which is incompatible with previous versions")
-export @str
+export @struct
 export pack, unpack, sizeof
 export DataAlign
 export align_default, align_packed, align_packmax, align_structpack, align_table
@@ -31,7 +30,7 @@ immutable Str
     endianness::Symbol
 end
 
-macro str(xpr...)
+@eval macro $(Symbol("struct"))(xpr...)
     (typname, typ, asize) = extract_annotations(xpr[1])
     if length(xpr) > 3
         error("too many arguments supplied to @str")
