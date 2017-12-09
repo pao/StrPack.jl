@@ -32,7 +32,7 @@ Let's also create the Julia analog of this structure::
 
     using StrPack
 
-    @str type TestStruct
+    @struct type TestStruct
         int1::Int32
         float1::Float32
     end
@@ -78,11 +78,11 @@ Voila! You have the result back.
 Macros
 ------
 
-.. function:: @str(type, strategy, endianness)
+.. function:: @struct(type, strategy, endianness)
 
     Create and register a structural Julia type with StrPack. The type argument uses an extended form of the standard Julia type syntax to define the size of arrays and strings. Each element must declare its type, and each type must be reducible to a bits type or array or composite of bits types.::
 
-        @str type StructuralType
+        @struct type StructuralType
             a::Float64 # a bits type
             b::Array{Int32,2}(4, 4) # an array of bits types
             c::ASCIIString(8) # a string with a fixed number of bytes
@@ -94,16 +94,16 @@ Methods
 
 .. function:: pack(io, composite[, asize, strategy, endianness])
 
-    Create a packed buffer representation of ``composite`` in stream ``io``, using array and string sizes fixed by ``asize`` and data alignment coded by ``strategy`` with endianness ``endianness``. If the optional arguments are not provided, then ``T``, the type of ``composite``, is expected to have been created with the ``@str`` macro.
+    Create a packed buffer representation of ``composite`` in stream ``io``, using array and string sizes fixed by ``asize`` and data alignment coded by ``strategy`` with endianness ``endianness``. If the optional arguments are not provided, then ``T``, the type of ``composite``, is expected to have been created with the ``@struct`` macro.
 
 .. function:: unpack(io, T[, asize, strategy, endianness])
 
     Extract an instance of the Julia composite type ``T`` from the packed representation in the stream ``io``.
-    If the optional arguments are not provided, then ``T`` is expected to have been created with the ``@str`` macro.
+    If the optional arguments are not provided, then ``T`` is expected to have been created with the ``@struct`` macro.
 
 .. function:: show_struct_layout(T[, asize, strategy][, width, bytesize])
 
-    Print a graphical representation of the memory layout of the packed type ``T``. If ``asize`` and ``strategy`` are not provided, then ``T`` is expected to have been created with the ``@str`` macro. The display will show ``width`` bytes in each row, with each byte taking up ``bytesize`` characters.
+    Print a graphical representation of the memory layout of the packed type ``T``. If ``asize`` and ``strategy`` are not provided, then ``T`` is expected to have been created with the ``@struct`` macro. The display will show ``width`` bytes in each row, with each byte taking up ``bytesize`` characters.
 
 ----------
 Endianness
