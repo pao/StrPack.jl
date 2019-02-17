@@ -1,4 +1,3 @@
-__precompile__(false)
 module StrPack
 
 export @struct
