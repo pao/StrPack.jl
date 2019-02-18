@@ -8,6 +8,7 @@ export align_x86_pc_linux_gnu, align_native
 export show_struct_layout
 
 using Base.Meta
+using Printf
 
 import Base.read, Base.write
 import Base.isequal
@@ -15,7 +16,7 @@ import Base.isequal
 bswap(c::Char) = identity(c) # white lie which won't work for multibyte characters in UTF-16 or UTF-32
 
 # Represents a particular way of adding bytes to maintain certain alignments
-immutable DataAlign
+struct DataAlign
     ttable::Dict
     # default::(Type -> Integer); used for bits types not in ttable
     default::Function
@@ -24,7 +25,7 @@ immutable DataAlign
 end
 DataAlign(def::Function, agg::Function) = DataAlign((Dict{Type,Integer}()), def, agg)
 
-immutable Str
+struct Str
     asize::Dict
     strategy::DataAlign
     endianness::Symbol
@@ -113,7 +114,7 @@ primitive type PadByte 8 end
 write(s::IO, x::PadByte) = write(s, 0x00)
 read(s::IO, ::Type{PadByte}) = read(s, UInt8)
 
-function isbitsequivalent{T}(::Type{T})
+function isbitsequivalent(::Type{T}) where T
     if isbits(T) || T <: AbstractString && !T.abstract
         return true
     elseif isempty(fieldnames(T))
@@ -131,7 +132,7 @@ function isbitsequivalent{T}(::Type{T})
     true
 end
 
-function chktype{T}(::Type{T})
+function chktype(::Type{T}) where T
     if isempty(fieldnames(T))
         error("Type $T is not an aggregate type.")
     end
@@ -140,7 +141,7 @@ function chktype{T}(::Type{T})
     end
 end
 
-function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianness::Symbol)
+function unpack(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianness::Symbol) where T
     chktype(T)
     tgtendianness = endianness_converters[endianness][2]
     offset = 0
@@ -183,18 +184,18 @@ function unpack{T}(in::IO, ::Type{T}, asize::Dict, strategy::DataAlign, endianne
     skip(in, pad_next(offset, T, strategy))
     T(rvar...)
 end
-function unpack{T}(in::IO, ::Type{T}, endianness::Symbol)
+function unpack(in::IO, ::Type{T}, endianness::Symbol) where T
     chktype(T)
     reg = T.name.module.STRUCT_REGISTRY[T]::Str
     unpack(in, T, reg.asize, reg.strategy, endianness)
 end
-function unpack{T}(in::IO, ::Type{T})
+function unpack(in::IO, ::Type{T}) where T
     chktype(T)
     reg = T.name.module.STRUCT_REGISTRY[T]::Str
     unpack(in, T, reg.asize, reg.strategy, reg.endianness)
 end
 
-function pack{T}(out::IO, str::T, asize::Dict, strategy::DataAlign, endianness::Symbol)
+function pack(out::IO, str::T, asize::Dict, strategy::DataAlign, endianness::Symbol) where T
     chktype(T)
     tgtendianness = endianness_converters[endianness][1]
     offset = 0
@@ -235,14 +236,14 @@ function pack{T}(out::IO, str::T, asize::Dict, strategy::DataAlign, endianness::
 end
 
 zeros(x, n) = Base.zeros(x, n)
-zeros{T}(x::Type{Ptr{T}}, n) = [x(C_NULL) for i in 1:n]
+zeros(x::Type{Ptr{T}}, n) where T = [x(C_NULL) for i in 1:n]
 
-function pack{T}(out::IO, str::T, endianness::Symbol)
+function pack(out::IO, str::T, endianness::Symbol) where T
     chktype(T)
     reg = T.name.module.STRUCT_REGISTRY[T]
     pack(out, str, reg.asize, reg.strategy, endianness)
 end
-function pack{T}(out::IO, str::T)
+function pack(out::IO, str::T) where T
     chktype(T)
     reg = T.name.module.STRUCT_REGISTRY[T]
     pack(out, str, reg.asize, reg.strategy, reg.endianness)
@@ -257,17 +258,17 @@ macro withIOBuffer(iostr, ex)
     end
 end
 
-pack{T}(str::T, a::Dict, s::DataAlign, n::Symbol) = @withIOBuffer iostr pack(iostr, a, s, n)
-pack{T}(str::T) = @withIOBuffer iostr pack(iostr, str)
+pack(str::T, a::Dict, s::DataAlign, n::Symbol) where T = @withIOBuffer iostr pack(iostr, a, s, n)
+pack(str::T) where T = @withIOBuffer iostr pack(iostr, str)
 
-unpack{T}(str::Union{AbstractString, Array{UInt8,1}}, ::Type{T}) = unpack(IOBuffer(str), T)
+unpack(str::Union{AbstractString, Array{UInt8,1}}, ::Type{T}) where T = unpack(IOBuffer(str), T)
 
 ## Alignment strategies and utility functions ##
 
 # default alignment for bitstype T is nextpow2(sizeof(::Type{T}))
-type_alignment_default{T<:AbstractArray}(::Type{T}) = type_alignment_default(eltype(T))
-type_alignment_default{T<:AbstractString}(::Type{T}) = 1
-type_alignment_default{T}(::Type{T}) = nextpow2(sizeof(T))
+type_alignment_default(::Type{T}) where T<:AbstractArray = type_alignment_default(eltype(T))
+type_alignment_default(::Type{T}) where T<:AbstractString = 1
+type_alignment_default(::Type{T}) where T = nextpow2(sizeof(T))
 
 # default strategy
 align_default = DataAlign(type_alignment_default, x -> maximum(map(type_alignment_default, x)))
@@ -325,7 +326,7 @@ function pad_next(offset, typ, strategy::DataAlign)
     (align_to - offset % align_to) % align_to
 end
 
-function calcsize{T}(::Type{T}, asize::Dict, strategy::DataAlign)
+function calcsize(::Type{T}, asize::Dict, strategy::DataAlign) where T
     chktype(T)
     size = 0
     for (typ, name) in zip(T.types, fieldnames(T))
@@ -349,9 +350,9 @@ function calcsize{T}(::Type{T}, asize::Dict, strategy::DataAlign)
     size += pad_next(size, T, strategy)
     size
 end
-calcsize{T}(::Type{T}) = calcsize(T, T.name.module.STRUCT_REGISTRY[T].asize, T.name.module.STRUCT_REGISTRY[T].strategy)
+calcsize(::Type{T}) where T = calcsize(T, T.name.module.STRUCT_REGISTRY[T].asize, T.name.module.STRUCT_REGISTRY[T].strategy)
 
-function show_struct_layout{T}(::Type{T}, asize::Dict, strategy::DataAlign, width, bytesize)
+function show_struct_layout(::Type{T}, asize::Dict, strategy::DataAlign, width, bytesize) where T
     chktype(T)
     offset = 0
     for (typ, name) in zip(T.types, fieldnames(T))
@@ -373,8 +374,8 @@ function show_struct_layout{T}(::Type{T}, asize::Dict, strategy::DataAlign, widt
         println()
     end
 end
-show_struct_layout{T}(::Type{T}) = show_struct_layout(T, T.name.module.STRUCT_REGISTRY[T].asize, T.name.module.STRUCT_REGISTRY[T].strategy, 8, 10)
-show_struct_layout{T}(::Type{T}, width::Integer, bytesize::Integer) = show_struct_layout(T, T.name.module.STRUCT_REGISTRY[T].asize, T.name.module.STRUCT_REGISTRY[T].strategy, width, bytesize)
+show_struct_layout(::Type{T}) where T = show_struct_layout(T, T.name.module.STRUCT_REGISTRY[T].asize, T.name.module.STRUCT_REGISTRY[T].strategy, 8, 10)
+show_struct_layout(::Type{T}, width::Integer, bytesize::Integer) where T = show_struct_layout(T, T.name.module.STRUCT_REGISTRY[T].asize, T.name.module.STRUCT_REGISTRY[T].strategy, width, bytesize)
 # show_struct_layout(T::Type, asize::Dict, strategy::DataAlign, width) = show_struct_layout(T, strategy, width, 10)
 
 function show_layout_format(typ, typsize, dims, width, bytesize, offset)
@@ -402,9 +403,9 @@ end
 
 ## Native layout ##
 align_native = align_table(align_default, let
-    i8a, i16a, i32a, i64a, f32a, f64a = Array{UInt}(1), Array{UInt}(1), Array{UInt}(1), Array{UInt}(1), Array{UInt}(1), Array{UInt}(1)
+    i8a, i16a, i32a, i64a, f32a, f64a = Array{UInt}(undef, 1), Array{UInt}(undef, 1), Array{UInt}(undef, 1), Array{UInt}(undef, 1), Array{UInt}(undef, 1), Array{UInt}(undef, 1)
 
-    ccall("jl_native_alignment", Void,
+    ccall("jl_native_alignment", Nothing,
           (Ptr{UInt}, Ptr{UInt}, Ptr{UInt}, Ptr{UInt}, Ptr{UInt}, Ptr{UInt}),
           i8a, i16a, i32a, i64a, f32a, f64a)
 
